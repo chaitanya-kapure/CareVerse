@@ -1,0 +1,21 @@
+{
+  "name": "careverse",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CAREVERSE — centralized patient health records with traceable, AI-assisted summaries. Hackathon MVP.",
+  "scripts": {
+    "setup": "npm install --prefix client",
+    "dev": "concurrently -n api,web -c cyan,magenta \"python server/dev.py\" \"npm --prefix client run dev\"",
+    "dev:client": "npm --prefix client run dev",
+    "dev:server": "python server/dev.py",
+    "build": "npm --prefix client run build",
+    "lint": "npm --prefix client run lint",
+    "typecheck": "npm --prefix client run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

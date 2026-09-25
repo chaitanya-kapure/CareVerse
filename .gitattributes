@@ -1,0 +1,20 @@
+# Normalize line endings so Windows checkouts don't produce huge noisy diffs.
+# Text files: LF in the repo, native on checkout.
+* text=auto
+
+*.py   text diff=python
+*.ts   text diff=typescript
+*.tsx  text diff=typescript
+*.js   text
+*.json text
+*.md   text
+*.css  text
+*.html text
+*.yml  text
+*.yaml text
+
+# Lockfiles and generated files: never rewrite.
+package-lock.json -text
+*.svg -text
+*.png binary
+*.pdf binary

@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment — never commit real secrets
+.env
+.env.local
+.env.*.local
+
+# Uploaded patient documents (health records — must not enter git).
+# Git cannot re-include a file whose parent directory is excluded, so the
+# documents/ directory must be un-ignored before the .gitkeep inside it.
+# Net effect: only the two .gitkeep placeholders are tracked, no patient file.
+server/storage/*
+!server/storage/.gitkeep
+!server/storage/documents/
+server/storage/documents/*
+!server/storage/documents/.gitkeep
+uploads/
+
+# Logs
+*.log
+npm-debug.log*
+logs/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

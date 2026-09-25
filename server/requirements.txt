@@ -1,0 +1,23 @@
+# --- Web framework -------------------------------------------------------
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20        # required by FastAPI for multipart/form-data uploads
+
+# --- Validation / settings ----------------------------------------------
+pydantic==2.10.4
+pydantic-settings==2.7.0
+email-validator==2.2.0           # powers pydantic EmailStr
+
+# --- Database ------------------------------------------------------------
+pymongo==4.10.1
+
+# --- Auth ----------------------------------------------------------------
+# bcrypt is used directly (passlib is unmaintained and warns on bcrypt 4.x)
+bcrypt==4.2.1
+python-jose[cryptography]==3.3.0
+
+# --- Document pipeline (Phase 2) ----------------------------------------
+pypdf==5.1.0                     # pure-python PDF text extraction, no native deps
+
+# --- AI provider client (Phase 3) ---------------------------------------
+httpx==0.28.1
