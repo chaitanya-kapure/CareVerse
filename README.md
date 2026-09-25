@@ -40,6 +40,41 @@ original document.
 - **Python 3.11+**
 - **MongoDB** running locally (`mongodb://localhost:27017`)
 
+### Running MongoDB
+
+No credentials are involved in local development. The API connects to a
+plain, unauthenticated local instance via `MONGODB_URI` in `server/.env`
+(default `mongodb://localhost:27017`).
+
+**If it is already a Windows service**, start it and move on:
+
+```powershell
+Get-Service MongoDB | Start-Service
+```
+
+**If you have no service** — the MSI sometimes installs the binaries without
+registering one — run `mongod` directly. This needs no administrator rights:
+
+```powershell
+$env:MONGODB_LOG = "$env:TEMP\mongod.log"
+mongod --dbpath "$env:TEMP\mongo-data" --port 27017 --bind_ip 127.0.0.1
+```
+
+Leave that window open while developing. To install it first:
+
+```powershell
+winget install --id MongoDB.Server --exact
+```
+
+`mongod` must be on your `PATH`; it is not added automatically. If the
+`winget` install prompts for elevation and you want to skip it, download the
+archive from the MongoDB downloads page and copy `mongod.exe` somewhere on
+your `PATH`.
+
+Verify with `GET /health` — it reports `database: connected` on success and
+`database: unavailable` when Mongo is not reachable, so you always get an
+honest answer instead of a connection error at the first request.
+
 ## Setup
 
 ```bash
