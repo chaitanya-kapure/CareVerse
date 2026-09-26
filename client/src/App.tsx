@@ -8,6 +8,7 @@ import AuthLayout from "./layouts/AuthLayout";
 import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import NotFoundPage from "./pages/NotFoundPage";
 
 import PatientDashboardPage from "./pages/patient/PatientDashboardPage";
@@ -39,6 +40,9 @@ export default function App() {
           <Route element={<AuthLayout />}>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            {/* Recovery is reachable without a session: the point is that
+                the user cannot sign in. */}
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           </Route>
 
           {/* Patient */}

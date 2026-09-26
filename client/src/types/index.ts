@@ -32,6 +32,40 @@ export interface AuthResponse {
   user: AuthUser;
 }
 
+// --- Password reset -------------------------------------------------------
+// Three requests and three responses, one per step. The `reset_token` is
+// opaque and single-use: it is not a session and grants nothing but one
+// password change.
+
+export interface ForgotPasswordPayload {
+  email: string;
+}
+
+export interface ForgotPasswordResponse {
+  detail: string;
+  code: string;
+  /** Constant, not a measurement of this request, so it leaks nothing. */
+  retry_after_seconds: number;
+  /** Configured OTP lifetime, matching the server's own clock. */
+  expires_in: number;
+}
+
+export interface VerifyOtpPayload {
+  email: string;
+  otp: string;
+}
+
+export interface VerifyOtpResponse {
+  reset_token: string;
+  expires_in: number;
+  detail: string;
+}
+
+export interface ResetPasswordPayload {
+  reset_token: string;
+  new_password: string;
+}
+
 export interface HealthStatus {
   status: "ok" | "degraded";
   database: "connected" | "unavailable";

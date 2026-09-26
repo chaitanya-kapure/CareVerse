@@ -1,0 +1,6 @@
+# Development-only dependencies.
+# Kept out of requirements.txt so a production install never pulls in a
+# test framework. The suite needs a reachable MongoDB; see tests/conftest.py.
+-r requirements.txt
+
+pytest==8.3.4

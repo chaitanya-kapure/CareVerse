@@ -168,13 +168,14 @@ careverse/
     │   │   ├── auth_middleware.py    # ★ security boundary
     │   │   └── error_handler.py
     │   ├── models/
-    │   │   ├── collections.py    # 5 collection names + accessors
+    │   │   ├── collections.py    # 6 collection names + accessors
     │   │   ├── indexes.py        # startup index creation
     │   │   ├── user.py
     │   │   ├── patient_profile.py
     │   │   ├── medical_document.py
     │   │   ├── access.py
-    │   │   └── patient_summary.py
+    │   │   ├── patient_summary.py
+    │   │   └── password_reset.py
     │   ├── routes/
     │   │   ├── __init__.py       # router registry
     │   │   ├── health.py
@@ -184,10 +185,15 @@ careverse/
     │   │   └── common.py
     │   ├── services/
     │   │   ├── auth_service.py   # ★ Phase 2: document, extraction,
+    │   │   ├── email_service.py  # provider seam: mock | smtp | gmail
+    │   │   ├── password_reset_service.py  # OTP issue / verify / reset
     │   │   └── __init__.py       #   storage, summary services
     │   └── utils/
-    │       ├── security.py       # bcrypt + JWT
+    │       ├── security.py       # bcrypt + JWT + OTP/reset-token hashing
     │       └── errors.py         # error envelope helpers
+    ├── tests/                   # pytest; own careverse_test database
+    │   ├── conftest.py
+    │   └── test_password_reset.py
     ├── scripts/                  # seed/demo data (Phase 4)
     └── storage/
         └── documents/            # uploaded PDFs (gitignored)
@@ -201,8 +207,10 @@ careverse/
 
 ## 4. MongoDB schemas
 
-Five collections. A field that is absent means "not found" — CAREVERSE never
-writes a default that could be mistaken for a clinical fact.
+Five collections hold clinical and identity data. A sixth,
+`password_reset_otps`, holds transient auth state and is reaped by MongoDB
+itself. A field that is absent means "not found" — CAREVERSE never writes a
+default that could be mistaken for a clinical fact.
 
 ### `users`
 ```jsonc
@@ -321,6 +329,47 @@ Index: `(doctor_id, patient_id)`. Grants are created by the **patient**
   "generated_at": ISODate
 }
 ```
+### `password_reset_otps`
+```jsonc
+{
+  "_id": ObjectId,
+  "user_id": "<users._id>",           // null while the address is unknown
+  "email": "asha@example.com",        // lowercased, for the cooldown lookup
+  "otp_hash": "$2b$12$…",            // bcrypt; the digits are never stored
+  "attempts": 0,                      // wrong guesses so far
+  "max_attempts": 5,                  // frozen at issue time
+  "expires_at": ISODate,              // drives the TTL index
+  "reset_token_hash": "…",            // unsalted SHA-256 of an opaque 256-bit token
+  "reset_token_expires_at": ISODate,
+  "created_at": ISODate,
+  "verified_at": null,                // set when the OTP is accepted
+  "consumed_at": null,                // set when the password is changed
+  "request_ip": null                  // abuse triage; never sent to a client
+}
+```
+
+Indexes: TTL on `expires_at` (`expireAfterSeconds: 0`), plus
+`(email, created_at desc)` for the resend cooldown and `(reset_token_hash)`
+for token lookup.
+
+The two secrets are hashed differently on purpose:
+
+- **The OTP is bcrypt'd.** Six digits is a search space of 10⁶, so it needs a
+  deliberately slow hash. `attempts` rises on every miss and the row is refused
+  once the budget is gone, which is what stops an online attack from walking
+  the whole space.
+- **The reset token is an unsalted SHA-256.** It is 256 bits of
+  `secrets.token_urlsafe`, so there is no dictionary to slow down — and the
+  lookup is *by* hash, which salting would turn into a full collection scan.
+
+`otp_hash` is cleared the moment the OTP verifies, which is what makes it
+genuinely single-use. Without that, the same digits could be exchanged
+repeatedly inside the validity window and mint a fresh reset token each time.
+
+There is no `is_active` field. "Active" is computed by one shared predicate,
+`otp_is_active()` in `models/password_reset.py`, so the request, verify and
+reset paths cannot disagree about what counts as live — and a state the code
+forgot to write cannot read as valid.
 
 ---
 
@@ -340,6 +389,13 @@ prefix, so the client calls `/api/auth/login` → server `/auth/login`.
 | POST | `/auth/login` | → `{ access_token, user }` |
 | 🔒 GET | `/auth/me` | Validate a stored token |
 | 🔒 POST | `/auth/logout` | Logout acknowledgement (stateless JWT) |
+| POST | `/auth/forgot-password` | Issue an OTP; always the same 200 |
+| POST | `/auth/verify-reset-otp` | OTP → single-use `reset_token` |
+| POST | `/auth/reset-password` | Spend the token, set the new password |
+
+The three reset routes are deliberately **unauthenticated**: the person using
+them has lost the password they would need a token for. They are constrained
+instead by attempt limits, TTLs, single use, and the resend cooldown.
 
 ### Patient
 | Method | Path | Role | Purpose |
@@ -399,6 +455,54 @@ Codes: `MISSING_TOKEN`, `INVALID_TOKEN`, `INVALID_CREDENTIALS`, `FORBIDDEN`,
 > therefore raised `503 Database not available` before ever checking the
 > token — masking auth failures and letting an unauthenticated caller probe
 > whether Mongo was up. Splitting them means a bad token is always a `401`.
+
+### Password recovery
+
+`email → OTP → reset token → new password`. The OTP is a 6-digit code from
+`secrets.randbelow` (never `random`) with a 10-minute life and 5 attempts; the
+reset token is an opaque 256-bit `secrets.token_urlsafe(32)` with a 10-minute
+life of its own.
+
+It is a **plain opaque token, not a JWT**. A JWT cannot be revoked, so
+single-use would be a claim rather than a fact — and an untested claim is
+exactly the kind that fails open. Looking the hash up in MongoDB makes "already
+spent" a real, enforced condition.
+
+Every one of these responses is chosen so it cannot tell a stranger which
+addresses are registered:
+
+| Situation | Response | Why not something else |
+|---|---|---|
+| Unknown address | `200 OTP_REQUEST_ACCEPTED` | A `404` would be a user-enumeration oracle |
+| Known address | `200 OTP_REQUEST_ACCEPTED` | Byte-identical; built only from constants |
+| Resend inside cooldown | `200 OTP_REQUEST_ACCEPTED` | A `429` would leak that a code *exists* |
+| No live code, or attempts spent | `400 OTP_ATTEMPTS_EXCEEDED` | One code for both, so six probes cannot separate a real account from a fake one |
+| Mail relay failed | `200 OTP_REQUEST_ACCEPTED` | `send_password_reset_otp` returns a bool and never raises, so a broken relay cannot become a 5xx-vs-200 oracle |
+
+`retry_after_seconds` and `expires_in` are returned so the client can count
+down without leaking anything: they are configuration constants, identical for
+every address.
+
+The code never appears in a response. The only place it is ever printed is the
+mock provider's `DEVELOPMENT ONLY` log line, and `config.py` refuses to start
+with `EMAIL_PROVIDER=mock` when `ENVIRONMENT=production` — the same guard that
+already exists for the JWT secret.
+
+### Email delivery
+
+`services/email_service.py` is a seam, not a vendor. It defines an
+`EmailProvider` protocol and builds one from `EMAIL_PROVIDER`:
+
+| Value | Behaviour |
+|---|---|
+| `mock` | Logs the OTP as `DEVELOPMENT ONLY` and keeps it in an in-memory outbox that tests read. Refused in production. |
+| `smtp` | stdlib `smtplib`. Port 465 → `SMTP_SSL`, anything else → `STARTTLS`. |
+| `gmail` | Recognized, but raises `EmailDeliveryError` until the API-oauth flow lands. Fails loudly rather than silently no-oping. |
+
+Nodemailer is deliberately absent: this backend is Python, so the transport is
+`smtplib`. Credentials come only from `SMTP_*` env vars — nothing is hardcoded,
+and no `.env` file is committed.
+
 
 ### Authorization — the core rule
 
@@ -574,7 +678,7 @@ explicitly, never left blank — silence would read as "nothing wrong".
 ### `server/.env`
 | Variable | Default | Purpose |
 |---|---|---|
-| `ENVIRONMENT` | `development` | `production` enforces a real JWT secret |
+| `ENVIRONMENT` | `development` | `production` enforces a real JWT secret and a real email provider |
 | `DEBUG` | `true` | Verbose logging |
 | `MONGODB_URI` | `mongodb://localhost:27017` | Connection string |
 | `MONGODB_DB_NAME` | `careverse` | Database name |
@@ -591,6 +695,19 @@ explicitly, never left blank — silence would read as "nothing wrong".
 | `AI_MODEL` | `gpt-4o-mini` | Model id |
 | `AI_BASE_URL` | `https://api.openai.com/v1` | Provider base URL |
 | `AI_TIMEOUT_SECONDS` | `30` | Provider request timeout |
+| `OTP_LENGTH` | `6` | Digits in the reset code (4–10) |
+| `OTP_TTL_MINUTES` | `10` | Code lifetime |
+| `OTP_MAX_ATTEMPTS` | `5` | Wrong guesses allowed per code |
+| `OTP_RESEND_COOLDOWN_SECONDS` | `60` | Minimum gap between codes |
+| `RESET_TOKEN_TTL_MINUTES` | `10` | Reset-token lifetime |
+| `EMAIL_PROVIDER` | `mock` | `mock` \| `smtp` \| `gmail`; `mock` refused in production |
+| `EMAIL_FROM` | `no-reply@careverse.local` | Envelope sender |
+| `SMTP_HOST` | *(empty)* | Required when `EMAIL_PROVIDER=smtp` |
+| `SMTP_PORT` | `587` | `465` selects implicit TLS |
+| `SMTP_USERNAME` | *(empty)* | Omit for unauthenticated relays |
+| `SMTP_PASSWORD` | *(empty)* | **Never committed** |
+| `SMTP_USE_TLS` | `true` | STARTTLS on non-465 ports |
+| `EMAIL_TIMEOUT_SECONDS` | `15` | Mail relay timeout |
 
 ### `client/.env`
 | Variable | Default | Purpose |
@@ -605,11 +722,20 @@ projects and `.env.example` carries placeholders only.
 
 ## 10. Phased implementation plan
 
-### Phase 1 — Foundation ✅ (this commit)
+### Phase 1 — Foundation ✅
 Project structure, both config layers, Mongo connection lifecycle, error
 envelope, auth (register/login/me/logout), authorization primitives, design
 tokens, reusable UI kit, full route table with honest placeholders, both
 `.env.example` files, this document.
+
+### Phase 1b — Password recovery ✅
+OTP forgot/reset password, delivered after Phase 1 and ahead of the document
+pipeline. Sixth collection (`password_reset_otps`) with a TTL index · bcrypt
+for the code, SHA-256 for the reset token · attempt limits, resend cooldown
+and single use enforced in the database rather than asserted · email-provider
+seam (`mock` / `smtp` / `gmail`) · `/forgot-password` page · 35 backend tests.
+**Exit criteria:** a locked-out user resets their password in the browser and
+signs in with the new one, which the suite now asserts end to end.
 
 ### Phase 2 — Patient profile & document pipeline
 Patient profile read/edit · storage driver + local implementation · PDF

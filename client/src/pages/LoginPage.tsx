@@ -69,6 +69,15 @@ export default function LoginPage() {
         <Button type="submit" isLoading={isPending} className="w-full">
           Sign in
         </Button>
+
+        <p className="text-center text-sm">
+          <Link
+            to="/forgot-password"
+            className="text-slate-600 underline underline-offset-2 hover:text-slate-900"
+          >
+            Forgot your password?
+          </Link>
+        </p>
       </form>
 
       <p className="mt-5 text-sm text-slate-600">

@@ -58,6 +58,32 @@ class Settings(BaseSettings):
     ai_base_url: str = "https://api.openai.com/v1"
     ai_timeout_seconds: int = 30
 
+    # --- Password reset (OTP) --------------------------------------------
+    # Deliberately short-lived and single-use. The stored record is the only
+    # copy of the OTP hash, and a TTL index removes it once it expires.
+    otp_length: int = 6
+    otp_ttl_minutes: int = 10
+    otp_max_attempts: int = 5
+    otp_resend_cooldown_seconds: int = 60
+    reset_token_ttl_minutes: int = 10
+
+    # --- Email ------------------------------------------------------------
+    # "mock" prints the OTP to the server log so the flow is testable with no
+    # third-party account. It is refused when ENVIRONMENT=production, because
+    # logging OTPs in production would hand them to anyone who can read logs.
+    # "smtp" sends a real message. "gmail" is reserved for a Gmail API client
+    # and is not implemented yet; selecting it fails loudly rather than
+    # silently pretending to send.
+    email_provider: str = "mock"
+    email_from: str = "no-reply@careverse.local"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    # Never committed, never logged. Supplied through the environment only.
+    smtp_password: str = ""
+    smtp_use_tls: bool = True
+    email_timeout_seconds: int = 15
+
     @field_validator("jwt_secret_key")
     @classmethod
     def _reject_default_secret_in_production(cls, value: str, info):
@@ -67,6 +93,36 @@ class Settings(BaseSettings):
             raise ValueError(
                 "JWT_SECRET_KEY must be set to a real secret when "
                 "ENVIRONMENT=production"
+            )
+        return value
+
+    @field_validator("otp_length")
+    @classmethod
+    def _validate_otp_length(cls, value: int) -> int:
+        # 4-10 digits. Fewer than 4 is trivially guessable even with attempt
+        # limits; more than 10 stops being typeable on a phone keyboard.
+        if not 4 <= value <= 10:
+            raise ValueError("OTP_LENGTH must be between 4 and 10 digits")
+        return value
+
+    @field_validator("email_provider")
+    @classmethod
+    def _validate_email_provider(cls, value: str, info):
+        allowed = {"mock", "smtp", "gmail"}
+        if value not in allowed:
+            raise ValueError(
+                f"EMAIL_PROVIDER must be one of {sorted(allowed)}, got '{value}'"
+            )
+
+        environment = (info.data or {}).get("environment", "development")
+        if environment == "production" and value == "mock":
+            # The mock provider writes the OTP into the server log. That is a
+            # development convenience and a production vulnerability, so it is
+            # refused here rather than left to whoever deploys this.
+            raise ValueError(
+                "EMAIL_PROVIDER=mock logs OTPs to the server log and is not "
+                "allowed when ENVIRONMENT=production. Set EMAIL_PROVIDER=smtp "
+                "and provide SMTP credentials."
             )
         return value
 

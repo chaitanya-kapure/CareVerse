@@ -7,11 +7,13 @@ from app.models.collections import (
     PATIENT_ACCESS,
     PATIENT_PROFILES,
     PATIENT_SUMMARIES,
+    PASSWORD_RESET_OTPS,
     USERS,
     get_medical_documents,
     get_patient_access,
     get_patient_profiles,
     get_patient_summaries,
+    get_password_reset_otps,
     get_users,
 )
 from app.models.indexes import ensure_indexes
@@ -28,6 +30,10 @@ from app.models.patient_summary import (
     SummarySection,
     serialize_summary,
 )
+from app.models.password_reset import (
+    PasswordResetOtpDocument,
+    otp_is_active,
+)
 from app.models.user import UserDocument, UserRole, serialize_user
 
 __all__ = [
@@ -40,6 +46,8 @@ __all__ = [
     "PATIENT_ACCESS",
     "PATIENT_PROFILES",
     "PATIENT_SUMMARIES",
+    "PASSWORD_RESET_OTPS",
+    "PasswordResetOtpDocument",
     "PatientAccessDocument",
     "PatientProfileDocument",
     "PatientSummaryDocument",
@@ -52,7 +60,9 @@ __all__ = [
     "get_patient_access",
     "get_patient_profiles",
     "get_patient_summaries",
+    "get_password_reset_otps",
     "get_users",
+    "otp_is_active",
     "serialize_access",
     "serialize_document",
     "serialize_profile",

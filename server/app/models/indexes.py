@@ -57,6 +57,33 @@ def ensure_indexes(db: Database) -> None:
         ),
     )
 
+    # Password-reset OTPs are the one thing in this schema with a hard
+    # deadline, so MongoDB enforces it. expireAfterSeconds=0 means "delete as
+    # soon as expires_at is in the past", which means the service never has to
+    # run a cleanup job and a forgotten OTP cannot linger on a server.
+    _safe(
+        db,
+        lambda: db[c.PASSWORD_RESET_OTPS].create_index(
+            [("expires_at", 1)], expireAfterSeconds=0, name="otp_ttl"
+        ),
+    )
+    # verify-otp resolves the active record for an email with one lookup.
+    _safe(
+        db,
+        lambda: db[c.PASSWORD_RESET_OTPS].create_index(
+            [("email", 1), ("created_at", -1)], name="otp_by_email_recent"
+        ),
+    )
+    # reset-password resolves the token by hash. Not unique: a spent record
+    # keeps its hash so the replay is auditable, and the query also filters
+    # on consumed_at.
+    _safe(
+        db,
+        lambda: db[c.PASSWORD_RESET_OTPS].create_index(
+            [("reset_token_hash", 1)], name="otp_by_reset_token"
+        ),
+    )
+
 
 def _safe(db: Database, operation) -> None:
     """Index creation must never stop the API from booting.

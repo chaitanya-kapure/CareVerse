@@ -34,6 +34,14 @@ class MongoManager:
                 settings.mongodb_uri,
                 serverSelectionTimeoutMS=5000,
                 uuidRepresentation="standard",
+                # PyMongo hands back naive datetimes unless asked otherwise,
+                # while everything in this codebase writes `datetime.now(
+                # timezone.utc)`. Comparing one against the other raises
+                # TypeError, so any expiry check would blow up at runtime.
+                # Reading back as aware UTC keeps writes and reads symmetric,
+                # and makes serialized timestamps carry an explicit offset
+                # instead of silently implying one.
+                tz_aware=True,
             )
             self._client.admin.command("ping")
             self._db = self._client[settings.mongodb_db_name]
