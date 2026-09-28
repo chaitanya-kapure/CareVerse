@@ -105,6 +105,35 @@ def resolve_patient_id(raw_id: str) -> str:
     return raw_id
 
 
+def assert_own_records(db: Database, user: UserDocument) -> str:
+    """Confirm the caller may act on their own records, and return that id.
+
+    For `/patients/me/*` routes the patient id is never in the request, so
+    the comparison inside `assert_patient_access` always resolves to OWNER.
+    It is still called, rather than skipped, for two reasons:
+
+      * it is the one place a doctor is refused. A doctor who reaches a
+        patient-only handler is rejected here instead of being allowed to
+        operate on their own id as if it were a patient's;
+      * every query below uses the id this function returns. Ownership is
+        therefore decided once, here, and never re-derived at a call site.
+
+    The id it returns is what all subsequent queries are scoped by -- which is
+    what stops "change the id in the request" from working, even though these
+    routes take no id at all today.
+    """
+    if user.get("role") != "patient":
+        # Reached only if a route forgot `require_roles("patient")`. Fail
+        # closed with a message that says what is actually wrong.
+        raise errors.forbidden(
+            "This action requires the patient role", code="ROLE_NOT_ALLOWED"
+        )
+
+    patient_id = str(user["_id"])
+    assert_patient_access(db, user, patient_id)
+    return patient_id
+
+
 def assert_patient_access(
     db: Database,
     user: UserDocument,

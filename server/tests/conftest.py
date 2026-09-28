@@ -1,4 +1,4 @@
-"""Test fixtures for the password-reset suite.
+"""Test fixtures for the password-reset and document-pipeline suites.
 
 The environment has to be set up *before* `app.config` is imported, because
 `Settings` reads it at import time and is then cached by `lru_cache`. That is
@@ -9,6 +9,11 @@ A real MongoDB is used rather than a fake. The behaviour under test is
 largely about how the service queries and updates documents, and a mock
 would only prove the mock behaves as written. The suite points at a separate
 `careverse_test` database and never touches development data.
+
+No test writes into `server/storage/`. File tests are redirected to a
+temporary directory by the `storage` fixture, because a suite that drops
+medical-looking files into the repository's own storage folder is exactly the
+kind of accident this project cannot afford.
 """
 
 import os
@@ -28,6 +33,7 @@ from pymongo import MongoClient  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services import email_service  # noqa: E402
+from app.services import storage as storage_module  # noqa: E402
 
 TEST_DB_NAME = "careverse_test"
 
@@ -91,6 +97,62 @@ def make_account(client, db):
         return response.json()["id"], email
 
     return _make
+
+
+@pytest.fixture(autouse=True)
+def storage(tmp_path):
+    """Point file storage at a temporary directory for every test.
+
+    Autouse rather than requested per test: a document test that forgets to
+    ask for this fixture would otherwise write real PDFs into the
+    repository's own `server/storage/documents/`. They are gitignored, so
+    nothing could be committed by accident -- but a suite that silently
+    leaves files behind in the project's storage directory is still the wrong
+    place for them, and forgetting is exactly how that happens.
+
+    `DocumentService` resolves the driver lazily, so installing it here is
+    enough -- no code under test needs to know it happened. Resetting
+    afterwards matters just as much: a leaked driver would route the *next*
+    test's uploads into this test's directory.
+    """
+    driver = storage_module.LocalStorageDriver(tmp_path / "documents")
+    storage_module.set_storage_driver(driver)
+    yield driver
+    storage_module.reset_storage_driver()
+
+
+@pytest.fixture()
+def login(client):
+    """Exchange credentials for the bearer headers every route expects."""
+
+    def _login(email: str, password: str = "Orig1nalPass!") -> dict:
+        response = client.post(
+            "/auth/login", json={"email": email, "password": password}
+        )
+        assert response.status_code == 200, response.text
+        return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+    return _login
+
+
+@pytest.fixture()
+def patient(make_account, login):
+    """A registered patient with a valid session."""
+    user_id, email = make_account(email="owner@example.com", role="patient")
+    return {"id": user_id, "email": email, "headers": login(email)}
+
+
+@pytest.fixture()
+def other_patient(make_account, login):
+    """A second, unrelated patient -- the cross-tenant adversary."""
+    user_id, email = make_account(email="stranger@example.com", role="patient")
+    return {"id": user_id, "email": email, "headers": login(email)}
+
+
+@pytest.fixture()
+def doctor(make_account, login):
+    user_id, email = make_account(email="doc@example.com", role="doctor")
+    return {"id": user_id, "email": email, "headers": login(email)}
 
 
 # --- helpers --------------------------------------------------------------

@@ -1,7 +1,7 @@
 # CAREVERSE — Architecture & Design
 
-**Status:** Phase 1 complete (foundation scaffolded). Phases 2–4 not yet built.
-**Last updated:** Phase 1
+**Status:** Phase 1 complete (foundation + password recovery). Phase 2 complete (patient profile & document pipeline). Phases 3–4 not yet built.
+**Last updated:** Phase 2
 
 ---
 
@@ -66,13 +66,14 @@ adding any of them would require revisiting the medical-safety boundaries in
 
 ```
 React page
-  → services/api.ts (axios attaches JWT)
-  → GET /api/doctor/patients/{id}/documents
-  → routes/documents.py           parse path + deps
+  → services/document.service.ts (axios attaches JWT)
+  → GET /api/patients/me/documents
+  → routes/documents.py            parse path + deps
   → controllers/document_controller.py
-  → middlewares: get_current_user → assert_patient_access
-  → services/document_service.py  business rules
-  → models/medical_document.py    collection + serializer
+  → middlewares: get_current_user → require_roles("patient")
+                 → assert_own_records
+  → services/document_service.py   business rules, query scoped by patient_id
+  → models/medical_document.py     collection + serializer
   ← JSON
 ```
 
@@ -130,6 +131,7 @@ careverse/
 │       │   ├── auth/RequireAuth.tsx
 │       │   ├── ui/               Button, Card, Field, Alert, Badge,
 │       │   │                     Spinner, EmptyState, PageHeader
+│       │   ├── ExtractionBadge.tsx  # completed / needs_ocr / failed
 │       │   ├── SafetyNotice.tsx
 │       │   └── PhasePlaceholder.tsx
 │       ├── context/
@@ -141,17 +143,21 @@ careverse/
 │       │   ├── AppShell.tsx      # signed-in: sidebar + topbar
 │       │   └── AuthLayout.tsx    # public: centered card
 │       ├── pages/
-│       │   ├── LandingPage · LoginPage · RegisterPage · NotFoundPage
+│       │   ├── LandingPage · LoginPage · RegisterPage · ForgotPasswordPage ·
+│       │   │   NotFoundPage
 │       │   ├── patient/  Dashboard · Profile · MedicalRecords ·
 │       │   │             UploadRecord · RecordDetails
 │       │   └── doctor/   Dashboard · AuthorizedPatients ·
 │       │                 PatientDetails · PatientRecords · PatientSummary
 │       ├── services/
 │       │   ├── api.ts            # axios instance + error normalization
-│       │   └── auth.service.ts
+│       │   ├── auth.service.ts
+│       │   ├── profile.service.ts   # GET/PATCH /patients/me
+│       │   └── document.service.ts  # list / upload (FormData) / blob fetch
 │       ├── types/index.ts
 │       └── utils/
 │           ├── disclaimers.ts    # all medical-safety copy, one place
+│           ├── format.ts         # byte + date formatting, timezone-safe
 │           └── navigation.ts     # role → nav items
 │
 └── server/
@@ -163,6 +169,8 @@ careverse/
     │   ├── database.py           # MongoManager + get_db()
     │   ├── controllers/          # thin orchestration
     │   │   ├── auth_controller.py
+    │   │   ├── patient_controller.py
+    │   │   ├── document_controller.py
     │   │   └── health_controller.py
     │   ├── middlewares/
     │   │   ├── auth_middleware.py    # ★ security boundary
@@ -179,29 +187,40 @@ careverse/
     │   ├── routes/
     │   │   ├── __init__.py       # router registry
     │   │   ├── health.py
-    │   │   └── auth.py
+    │   │   ├── auth.py
+    │   │   ├── patients.py       # /patients/me
+    │   │   └── documents.py      # /patients/me/documents
     │   ├── schemas/              # Pydantic request/response
     │   │   ├── auth.py
-    │   │   └── common.py
+    │   │   ├── common.py
+    │   │   ├── profile.py
+    │   │   └── documents.py
     │   ├── services/
-    │   │   ├── auth_service.py   # ★ Phase 2: document, extraction,
+    │   │   ├── auth_service.py
     │   │   ├── email_service.py  # provider seam: mock | smtp | gmail
     │   │   ├── password_reset_service.py  # OTP issue / verify / reset
-    │   │   └── __init__.py       #   storage, summary services
+    │   │   ├── profile_service.py     # read/update, lazy row creation
+    │   │   ├── document_service.py    # ★ upload / read / delete pipeline
+    │   │   ├── storage.py             # StorageDriver seam + local driver
+    │   │   ├── extraction_service.py  # ★ pypdf → text, honest status
+    │   │   └── __init__.py       #   summary services (Phase 3)
     │   └── utils/
     │       ├── security.py       # bcrypt + JWT + OTP/reset-token hashing
     │       └── errors.py         # error envelope helpers
     ├── tests/                   # pytest; own careverse_test database
     │   ├── conftest.py
-    │   └── test_password_reset.py
+    │   ├── pdf_fixtures.py      # PDFs built in-process, never committed
+    │   ├── test_password_reset.py
+    │   ├── test_patient_profile.py
+    │   └── test_documents.py
     ├── scripts/                  # seed/demo data (Phase 4)
     └── storage/
         └── documents/            # uploaded PDFs (gitignored)
 ```
 
 **Not yet created** (arrive with their phase, rather than as empty stubs):
-`hooks/usePatientProfile.ts`, `hooks/useDocuments.ts` and the
-`services/{storage,document,extraction,summary}*.py` modules.
+`hooks/useDocuments.ts`, the structured information-extractor that will sit
+behind `extraction_service`, and `services/summary_service.py`.
 
 ---
 
@@ -230,8 +249,8 @@ default that could be mistaken for a clinical fact.
 {
   "_id": ObjectId,
   "patient_id": "<users._id>",     // UNIQUE — one profile per patient
-  "full_name": "Asha Menon",       // seeded from the user at registration
-  "date_of_birth": "1992-04-18",   // ISO string, nullable
+  "full_name": "Asha Menon",       // seeded from the user at registration; updating syncs users.name
+  "date_of_birth": "1992-04-18",   // ISO date string (YYYY-MM-DD), nullable
   "gender": "unspecified",         // male|female|other|unspecified
   "phone": null,
   "address": null,
@@ -248,13 +267,13 @@ default that could be mistaken for a clinical fact.
   "original_filename": "cbc-report.pdf",   // display only
   "stored_filename": "b3f1...pdf",         // generated, never user input
   "storage_driver": "local",              // "s3" later
-  "storage_key": "b3f1...pdf",
+  "storage_key": "b3f1...pdf",            // opaque key, path-traversal safe
   "mime_type": "application/pdf",
   "size_bytes": 182340,
-  "title": "Complete Blood Count",
+  "title": "Complete Blood Count",        // user-supplied, else filename
   "category": "lab_report",        // lab_report|prescription|
                                    // discharge_summary|imaging|other
-  "document_date": "2025-11-02",   // date ON the document, not upload date
+  "document_date": "2025-11-02",   // date ON the document, not upload date (nullable)
   "extraction_status": "completed", // pending|processing|completed|
                                    // needs_ocr|failed
   "extraction_error": null,
@@ -291,6 +310,10 @@ default that could be mistaken for a clinical fact.
 Every entry in `extracted_data` carries `source_text` — the literal line it
 came from. This is what makes the summary auditable and lets the UI deep-link
 back into the document.
+
+**As built in Phase 2**, `extracted_text` is populated and `extracted_data` is
+still `{}`: the structured pass lands in Phase 3 with the summary that consumes
+it. The field exists now so no migration is needed when it does.
 
 ### `patient_access`
 ```jsonc
@@ -398,19 +421,22 @@ them has lost the password they would need a token for. They are constrained
 instead by attempt limits, TTLs, single use, and the resend cooldown.
 
 ### Patient
-| Method | Path | Role | Purpose |
-|---|---|---|---|
-| 🔒🛡 | GET | `/patients/me` | patient | Own profile |
-| 🔒🛡 | PATCH | `/patients/me` | patient | Edit basic details |
-| 🔒🛡 | GET | `/patients/me/documents` | patient | Own records, newest first |
-| 🔒🛡 | POST | `/patients/me/documents` | patient | Upload PDF (`multipart`) |
-| 🔒🛡 | GET | `/patients/me/documents/{documentId}` | patient | Metadata + extracted data + text |
-| 🔒🛡 | DELETE | `/patients/me/documents/{documentId}` | patient | Delete record + file |
-| 🔒🛡 | GET | `/patients/me/documents/{documentId}/file` | patient | Stream the original PDF |
-| 🔒🛡 | GET | `/patients/me/summary` | patient | Own generated summary |
-| 🔒🛡 | GET | `/patients/me/access` | patient | Doctors currently authorized |
-| 🔒🛡 | POST | `/patients/me/access` | patient | Grant a doctor (`doctor_id`) |
-| 🔒🛡 | DELETE | `/patients/me/access/{accessId}` | patient | Revoke |
+Every path below starts with `/patients/me` — there is no patient id in any of
+them, so there is no id in the request to change.
+
+| Method | Path | Role | Status | Purpose |
+|---|---|---|---|---|
+| 🔒🛡 | GET | `/patients/me` | patient | ✅ Phase 2 | Own profile |
+| 🔒🛡 | PATCH | `/patients/me` | patient | ✅ Phase 2 | Edit basic details (partial) |
+| 🔒🛡 | GET | `/patients/me/documents` | patient | ✅ Phase 2 | Own records, newest first |
+| 🔒🛡 | POST | `/patients/me/documents` | patient | ✅ Phase 2 | Upload PDF (`multipart`) |
+| 🔒🛡 | GET | `/patients/me/documents/{documentId}` | patient | ✅ Phase 2 | Metadata + extracted data + text |
+| 🔒🛡 | DELETE | `/patients/me/documents/{documentId}` | patient | ✅ Phase 2 | Delete record + file |
+| 🔒🛡 | GET | `/patients/me/documents/{documentId}/file` | patient | ✅ Phase 2 | Stream the original PDF |
+| 🔒🛡 | GET | `/patients/me/summary` | patient | Phase 3 | Own generated summary |
+| 🔒🛡 | GET | `/patients/me/access` | patient | Phase 3 | Doctors currently authorized |
+| 🔒🛡 | POST | `/patients/me/access` | patient | Phase 3 | Grant a doctor (`doctor_id`) |
+| 🔒🛡 | DELETE | `/patients/me/access/{accessId}` | patient | Phase 3 | Revoke |
 
 ### Doctor
 | Method | Path | Role | Purpose |
@@ -428,10 +454,35 @@ Every failure, from every layer:
 ```json
 { "detail": "Human readable sentence.", "code": "MACHINE_CODE" }
 ```
-Codes: `MISSING_TOKEN`, `INVALID_TOKEN`, `INVALID_CREDENTIALS`, `FORBIDDEN`,
-`NOT_RECORD_OWNER`, `NO_PATIENT_ACCESS`, `ROLE_NOT_ALLOWED`, `NOT_FOUND`,
-`EMAIL_TAKEN`, `VALIDATION_ERROR`, `UNSUPPORTED_FILE_TYPE`, `FILE_TOO_LARGE`,
-`EXTRACTION_FAILED`, `DATABASE_UNAVAILABLE`, `INTERNAL_ERROR`.
+
+`detail` is safe to render: no stack traces, no filesystem paths, no
+exception types, and nothing drawn from the document's contents.
+
+| Situation | HTTP | `code` |
+|---|---|---|
+| No / bad bearer token | 401 | `MISSING_TOKEN` · `INVALID_TOKEN` |
+| Wrong email or password | 401 | `INVALID_CREDENTIALS` |
+| Email already registered | 409 | `EMAIL_TAKEN` |
+| Not your own patient record | 403 | `NOT_RECORD_OWNER` |
+| Doctor without a grant | 403 | `NO_PATIENT_ACCESS` |
+| Wrong role for the route | 403 | `ROLE_NOT_ALLOWED` |
+| Body or form field invalid | 422 | `VALIDATION_ERROR` |
+| Upload is not a PDF by MIME | 415 | `UNSUPPORTED_FILE_TYPE` |
+| Upload claims PDF but is not | 400 | `INVALID_FILE_TYPE` |
+| No file part in the request | 400 | `FILE_MISSING` |
+| Upload over `MAX_UPLOAD_MB` | 413 | `FILE_TOO_LARGE` |
+| Document missing, or not yours | 404 | `DOCUMENT_NOT_FOUND` |
+| Metadata exists, file does not | 404 | `DOCUMENT_FILE_MISSING` |
+| Could not write the file | 500 | `STORAGE_FAILED` |
+| Could not remove the file | 500 | `STORAGE_DELETE_FAILED` |
+| Database unreachable | 503 | `DATABASE_UNAVAILABLE` |
+| Anything unexpected | 500 | `INTERNAL_ERROR` |
+
+**Extraction failure is not in this table, on purpose.** It is not an error
+response: the upload succeeded, so the answer is `201` with
+`extraction_status = "failed"` and a plain-language `extraction_error` on the
+document. A patient whose PDF could not be parsed must not see the upload
+itself reported as broken.
 
 ---
 
@@ -540,61 +591,197 @@ Consequences that matter:
 
 Frontend `RequireAuth` is a UX convenience only. It is never the control.
 
+### Own-records routes (`/patients/me/*`) — Phase 2
+
+Every Phase 2 route is mounted under `/patients/me` and gated by
+`require_roles("patient")`. There is deliberately **no patient id in the path or
+body**: a patient editing their own profile is not a resource lookup, so there
+is no identifier in the request to substitute.
+
+The controller still calls `assert_own_records(db, user)`, which resolves the
+owner's id from the *session* and returns it. Two things follow:
+
+1. Ownership is decided once, in the one function that also refuses a doctor.
+   The id a handler queries by is the id that was authorized — it is never
+   re-derived from request data at a call site.
+2. Every MongoDB query is scoped by that returned id —
+   `find({"patient_id": patient_id})`, `delete_one({"_id": …, "patient_id": …})`.
+   The scope is **inside the query**, not a comparison applied afterwards.
+
+```python
+doc = self._docs.find_one({"_id": ObjectId(document_id), "patient_id": patient_id})
+if doc is None:
+    raise errors.not_found("Document not found", code="DOCUMENT_NOT_FOUND")
+```
+
+### Why cross-patient access is `404`, not `403`
+
+A document id belonging to another patient and a document id that does not
+exist are **the same response**: `404 DOCUMENT_NOT_FOUND`.
+
+Answering `403` would confirm that someone else's record with that id is real —
+a free enumeration oracle over the whole collection, from a single logged-in
+account. With the id in the query filter, the "does it exist and is it mine?"
+question is never asked, because the database cannot distinguish the two cases
+either. The status code is the access-control decision, not a detail added on
+top of one.
+
+`403 NOT_RECORD_OWNER` still exists in `assert_patient_access` for the
+`/patients/{patientId}` routes that Phase 3 adds: there the patient record
+itself was already proven to exist by the time the check runs, so nothing is
+being disclosed by the distinction.
+
 ---
 
-## 7. PDF upload & extraction pipeline
+## 7. Patient profile
+
+Six editable fields, all of them typed by the patient: `full_name`,
+`date_of_birth`, `gender`, `phone`, `address`, `notes`. There is no derived,
+inferred or predicted field anywhere in the schema — a profile is what the
+patient said about themselves, never what the system concluded.
+
+The row is created at registration by `AuthService.ensure_patient_profile`
+(upsert, so a patient always has one), and `ProfileService.get` will recreate
+it lazily if it is ever missing. A patient who reaches the profile screen with
+no row sees an empty form, not a 404: having an account *is* what the profile
+is a fixture of.
+
+### PATCH semantics
+
+`PATCH /patients/me` writes only the fields present in the body
+(`model_dump(exclude_unset=True)`). Sending `{"phone": "…"}` must not blank the
+address; sending `{"address": null}` clears it. Omitting a field and clearing it
+are different requests, and the schema is where that distinction is preserved.
+
+Dates are validated as real calendar dates (`2026-02-30` is rejected) and
+stored as bare `YYYY-MM-DD` strings. A date of birth is a fact about a
+calendar, not an instant, so it is never converted to and from a timezone —
+`new Date("1992-04-18")` in the client parses it as UTC midnight and can render
+the previous day west of Greenwich. `client/src/utils/format.ts` parses it as a
+bare date for the same reason.
+
+`full_name` also updates `users.name`. They are one piece of information to the
+patient, and storing it in two places only invites the topbar and the profile
+to disagree. The write list is an explicit `EDITABLE_FIELDS` tuple rather than
+the schema's own keys, so a new schema field cannot start persisting without
+being added to that list on purpose.
+
+---
+
+## 8. PDF upload & extraction pipeline
+
+Implemented in `services/document_service.py` (the pipeline),
+`services/storage.py` (where bytes live) and
+`services/extraction_service.py` (what the bytes say).
 
 ```
-POST /patients/me/documents  (multipart)
+POST /patients/me/documents  (multipart/form-data)
   │
-  ├─ 1. multer receives into a temp dir, size-capped at MAX_UPLOAD_MB
-  ├─ 2. validate      MIME in ALLOWED_MIME_TYPES (application/pdf)
-  │                   + magic bytes start with %PDF-  ← extension lies
-  ├─ 3. store         StorageDriver.save() → generated name, never the
-  │                   user's filename; returns a storage_key
-  ├─ 4. persist       medical_documents row, extraction_status="pending"
-  │                   → respond 201 immediately (upload is not blocked
-  │                     on extraction)
-  ├─ 5. extract       ExtractionService.extract()
-  ├─ 6. structure     InformationExtractor.parse(text)
-  ├─ 7. store         write extracted_text + extracted_data,
-  │                   set extraction_status
-  ├─ 8. summarize     SummaryService.regenerate(patient_id)
-  └─ 9. cleanup       delete the temp file
+  ├─ 1. cheap checks   filename present, MIME in ALLOWED_MIME_TYPES
+  │                    (415 UNSUPPORTED_FILE_TYPE)
+  ├─ 2. read capped    stream in 256 KB chunks, abort at MAX_UPLOAD_MB
+  │                    (413 FILE_TOO_LARGE) — nothing is stored on failure
+  ├─ 3. magic bytes    content must start with %PDF-  ← the extension lies
+  │                    (400 INVALID_FILE_TYPE)
+  ├─ 4. store          driver.new_key() + driver.save() → opaque storage_key
+  │                    generated here, never taken from the upload
+  ├─ 5. persist        medical_documents row, extraction_status="processing"
+  │                    rollback: if this insert fails, the file is deleted
+  ├─ 6. extract        asyncio.to_thread(extraction_service.extract_text)
+  ├─ 7. record outcome write extracted_text / page_count / extraction_status
+  └─ 8. respond 201    the finished document, extraction already settled
 ```
+
+Steps 1–3 run **before any write**, so a rejected upload leaves neither a file
+nor a row behind. Step 5 happens **before** extraction, because extraction is
+the only part of the pipeline that parses an untrusted file and the part most
+likely to fail — and a failure there must not cost the patient their upload.
+
+### Why extraction is inline
+
+`ExtractionService` runs in the request, off the event loop
+(`asyncio.to_thread`, so one crafted PDF cannot stall every other request).
+There is no task queue in this phase. The trade-off is deliberate: the client
+receives the **real** status instead of a `pending` placeholder it would have
+to poll for, and a document is never observed in a state that is not real.
+
+The cost is response latency on large files, which the client bounds with a
+120 s timeout on the upload request specifically.
+
+### The three honest outcomes
+
+| `extraction_status` | When | `extracted_text` |
+|---|---|---|
+| `completed` | pypdf returned characters | the text |
+| `needs_ocr` | the PDF read fine but has under `NEEDS_OCR_MIN_CHARS` characters | **`null`** |
+| `failed` | pypdf raised, the file is encrypted, or it exceeds `MAX_PAGES` | **`null`** |
+
+`pending` and `processing` exist in the enum and are written mid-pipeline, but
+no request ever returns one, because extraction completes before the response.
+
+Two rules make these trustworthy:
+
+- **Nothing is invented.** A scanned PDF has no embedded text, so
+  `extracted_text` is stored as `null` — not `""`. An empty string would let a
+  later screen present "no text found" as if it were the record's content.
+- **A failure never fails the upload.** The response is still `201` with
+  `extraction_status = "failed"`, the file is still stored, and the original
+  is still downloadable. The patient keeps the document they uploaded.
+
+`extraction_error` carries a plain sentence for the patient. It is written
+from a fixed set of phrases and never contains an exception type, a path, or
+any part of the document.
+
+### Bounds
+
+| Constant | Value | Why |
+|---|---|---|
+| `NEEDS_OCR_MIN_CHARS` | 10 | A real page of results is orders of magnitude longer; an image-only page yields a stray page number at most |
+| `MAX_EXTRACTED_CHARS` | 500 000 | Mongo caps a document at 16 MB; past this the text is not read in the UI anyway |
+| `MAX_PAGES` | 1 000 | The byte cap does not bound CPU — thousands of tiny pages fit in 2 MB. Over the cap the document is **refused for extraction**, not silently truncated |
+
+Truncating half a medical record and calling it `completed` would be worse than
+saying it was not extracted, so the page cap refuses rather than cuts.
 
 ### Storage abstraction
 ```python
 class StorageDriver(Protocol):
-    def save(self, source: Path, key: str) -> StoredFile: ...
-    def open(self, key: str) -> BinaryIO: ...
+    def new_key(self, suffix: str = ".pdf") -> str: ...   # opaque, no user input
+    def save(self, content: bytes, key: str) -> str: ...  # raises StorageError
+    def open(self, key: str) -> bytes: ...
     def delete(self, key: str) -> None: ...
     def exists(self, key: str) -> bool: ...
 ```
-`LocalStorageDriver` writes under `server/storage/documents/`. An
-`S3StorageDriver` can be added later; only the driver name in `.env` changes,
-because no caller ever touches a filesystem path.
+`LocalStorageDriver` writes under `server/storage/documents/`, flat, one file
+per document. An `S3StorageDriver` can be added later; only `STORAGE_DRIVER` in
+`.env` changes, because no caller ever touches a filesystem path.
 
-Uploaded files are **never** served as static files. A `GET …/file` route
-re-runs `assert_patient_access` first, then streams. A predictable URL over
-`server/storage` would be a total authorization bypass.
+Three properties this layer is responsible for:
 
-### Extraction
-- **pypdf** — pure Python, no native build, good enough for digitally
-  generated PDFs. This is the direct answer to the spec's "choose a reliable
-  PDF text-extraction library".
-- Page count and per-page text come from the same read, so pages are
-  traceable in the source reference.
-- **Low-text PDFs** (below a character threshold) are marked
-  `extraction_status = "needs_ocr"`. The UI shows *"This PDF contains no
-  readable text. It looks like a scanned or image-only document."*
-  **No text is ever fabricated to fill the gap.**
-- The extractor sits behind a narrow interface, so an OCR provider can be
-  added as a fallback branch later without touching the pipeline.
+- **The key is generated, never taken from the upload.** A filename is
+  attacker-controlled input and must never decide where bytes land on disk.
+- **Every key is resolved and checked against the driver root.** A key with a
+  path separator, or one that resolves outside the root, raises `StorageError` —
+  so `../` cannot walk out of the storage directory even if one reaches here.
+- **Writes are staged and renamed** (`.part` → final), so an interrupted write
+  cannot leave a half-written PDF that later looks like a valid record.
 
-### Structured extraction
+Uploaded files are **never** served as static files. `GET …/file` re-runs
+`assert_own_records` and re-reads the document through the same owner-scoped
+query first. A predictable URL over `server/storage` would be a total
+authorization bypass.
+
+### Delete order
+
+The file is removed **first**, then the row. An orphaned row is a visible,
+retryable inconvenience; an orphaned copy of a medical document sitting on
+disk is neither.
+
+### Structured extraction — Phase 3
+
 Deterministic, regex/heuristic based — **not** an LLM, so it is testable and
-reproducible:
+reproducible. This phase stores the raw text only; the structured pass lands
+with the summary and is not yet written:
 
 - document date: date-like patterns near "date", "reported on"
 - lab values: `name  value unit (range)` with an abnormal flag when the value
@@ -610,7 +797,7 @@ in the uploaded records" propagates to the summary.
 
 ---
 
-## 8. Summary generation
+## 9. Summary generation
 
 ```
 SummaryService.regenerate(patient_id)
@@ -673,7 +860,7 @@ explicitly, never left blank — silence would read as "nothing wrong".
 
 ---
 
-## 9. Environment variables
+## 10. Environment variables
 
 ### `server/.env`
 | Variable | Default | Purpose |
@@ -720,7 +907,7 @@ projects and `.env.example` carries placeholders only.
 
 ---
 
-## 10. Phased implementation plan
+## 11. Phased implementation plan
 
 ### Phase 1 — Foundation ✅
 Project structure, both config layers, Mongo connection lifecycle, error
@@ -737,13 +924,22 @@ seam (`mock` / `smtp` / `gmail`) · `/forgot-password` page · 35 backend tests.
 **Exit criteria:** a locked-out user resets their password in the browser and
 signs in with the new one, which the suite now asserts end to end.
 
-### Phase 2 — Patient profile & document pipeline
-Patient profile read/edit · storage driver + local implementation · PDF
-upload with MIME + magic-byte validation · pypdf extraction with
-`needs_ocr` handling · structured extraction · document list/detail/delete ·
-file streaming with authorization · patient record screens.
+### Phase 2 — Patient profile & document pipeline ✅
+`GET`/`PATCH /patients/me` with partial-update and null-clearing semantics ·
+`StorageDriver` seam + `LocalStorageDriver` (generated keys, root-confined
+paths, staged writes) · PDF upload with MIME **and** magic-byte validation and
+a chunked size cap · inline pypdf extraction with `completed` / `needs_ocr` /
+`failed` outcomes and explicit bounds · list / detail / delete / file-stream,
+every query scoped by `patient_id` and cross-patient access answered `404` ·
+patient Dashboard, Profile, Medical Records, Upload and Record Details screens ·
+47 new backend tests (82 total).
 **Exit criteria:** a patient uploads 3 PDFs, sees them listed, opens one, and
-sees the extracted text.
+sees the extracted text — **met and asserted end to end**, including the
+scanned-document and unreadable-PDF cases.
+
+Structured extraction (`extracted_data`) moves to Phase 3 with the summary that
+consumes it; storing raw text alone is sufficient until then, and leaves nothing
+unread.
 
 ### Phase 3 — Authorization & AI summary
 Patient grants/revokes doctor access · `assert_patient_access` wired into
@@ -763,3 +959,9 @@ key or an empty database.
 OCR, image/document formats other than PDF, S3/Cloudinary, refresh-token
 rotation, rate limiting, audit logging, and every feature in §17 of the
 product spec.
+
+A scanned PDF is a real case, not an edge case, and this phase answers it
+honestly: `needs_ocr`, no invented text, the original still downloadable. An
+OCR provider is a later branch behind the same `extract_text()` seam — it is
+excluded because a wrong OCR read would enter the summary as a clinical fact,
+which is worse than an honest "needs_ocr".

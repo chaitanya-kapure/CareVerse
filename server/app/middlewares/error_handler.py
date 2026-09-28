@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.utils.errors import build_error_body
+from app.utils.errors import build_error_body, flatten_errors
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +33,9 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
         # Flatten pydantic's error list into one sentence the UI can show
         # above the form. The full list stays on the server log.
-        problems = []
-        for error in exc.errors():
-            location = ".".join(str(part) for part in error.get("loc", []) if part != "body")
-            message = error.get("msg", "Invalid value")
-            problems.append(f"{location}: {message}" if location else message)
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content=build_error_body("; ".join(problems) or "Invalid request", "VALIDATION_ERROR"),
+            content=build_error_body(flatten_errors(exc.errors()), "VALIDATION_ERROR"),
         )
 
     @app.exception_handler(Exception)

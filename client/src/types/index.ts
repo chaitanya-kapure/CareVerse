@@ -123,6 +123,39 @@ export interface MedicalDocumentDetail extends MedicalDocumentSummary {
   extracted_data: Record<string, unknown>;
 }
 
+/**
+ * PATCH body for the profile. Every field is optional and `null` means
+ * "clear this" -- omitting a field leaves it untouched, which is why there
+ * is no `Partial<>` variant that would make omission and clearing identical.
+ */
+export interface PatientProfileUpdate {
+  full_name?: string | null;
+  date_of_birth?: string | null;
+  gender?: "male" | "female" | "other" | "unspecified" | null;
+  phone?: string | null;
+  address?: string | null;
+  notes?: string | null;
+}
+
+/** Shape of `GET /patients/me/documents`. */
+export interface DocumentListResponse {
+  items: MedicalDocumentSummary[];
+  total: number;
+}
+
+/**
+ * Fields the upload form collects alongside the file.
+ *
+ * All optional: a patient who just wants their report filed can drop the PDF
+ * in and go. The server derives a title from the filename when it is empty.
+ */
+export interface DocumentUploadForm {
+  file: File;
+  title?: string;
+  category?: string;
+  document_date?: string;
+}
+
 // --- Phase 3: authorization + summary -----------------------------------
 
 export interface AuthorizedPatient {
