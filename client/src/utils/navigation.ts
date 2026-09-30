@@ -22,11 +22,13 @@ export const PATIENT_NAV: NavItem[] = [
   { label: "Upload Record", to: "/patient/records/upload" },
 ];
 
+// Only routes that resolve without knowing a patient id. The record and
+// summary screens hang off `/doctor/patients/:patientId/...`, so they are
+// reached from the patient list rather than from the sidebar -- a link to
+// `/doctor/patients/records` would have no patient to attach.
 export const DOCTOR_NAV: NavItem[] = [
   { label: "Dashboard", to: "/doctor", end: true },
   { label: "Authorized Patients", to: "/doctor/patients" },
-  { label: "Patient Records", to: "/doctor/patients/records" },
-  { label: "Patient Summary", to: "/doctor/patients/summary" },
 ];
 
 export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {

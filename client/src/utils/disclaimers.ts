@@ -15,6 +15,18 @@ export const AI_SUMMARY_DISCLAIMER =
 export const NOT_A_DIAGNOSIS_NOTICE =
   "CAREVERSE summarizes documents you have uploaded. It does not diagnose conditions, recommend treatment, or provide medical advice.";
 
+/**
+ * The same boundary, stated for a doctor reading a patient's records.
+ *
+ * Separate from the string above because that one is addressed to the person
+ * who uploaded the documents, and on a doctor screen "documents you have
+ * uploaded" names the wrong person — the doctor uploaded nothing. The claim
+ * being made is identical: CAREVERSE stores and extracts, it does not
+ * interpret.
+ */
+export const NOT_A_DIAGNOSIS_READER_NOTICE =
+  "You are reading records a patient uploaded and authorized you to see. CAREVERSE stores documents and extracts their text; it does not interpret them, diagnose conditions, or recommend treatment.";
+
 /** Shown on the record-details screen next to extracted text. */
 export const EXTRACTION_NOTICE =
   "Extracted text is produced automatically and may be incomplete or misread. Always confirm values against the original document.";

@@ -86,3 +86,21 @@ export function formatCategory(value: string | null | undefined): string {
   if (!value) return "Document";
   return CATEGORY_LABELS[value] ?? value;
 }
+
+/**
+ * Human labels for the stored `Gender` values.
+ *
+ * "unspecified" is the profile default and means the patient chose not to say
+ * it, so it is rendered as "Not recorded" rather than as a gender -- a
+ * clinician should not read a default as a finding.
+ */
+const GENDER_LABELS: Record<string, string> = {
+  male: "Male",
+  female: "Female",
+  other: "Other",
+};
+
+export function formatGender(value: string | null | undefined): string {
+  if (!value) return "Not recorded";
+  return GENDER_LABELS[value] ?? "Not recorded";
+}

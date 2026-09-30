@@ -1,5 +1,15 @@
 """Pydantic schemas: the API's validation and serialization layer."""
 
+from app.schemas.access import (
+    AccessGrantListResponse,
+    AccessGrantRequest,
+    AccessGrantResponse,
+    DoctorDocumentDetailResponse,
+    DoctorDocumentListResponse,
+    DoctorPatientListResponse,
+    DoctorPatientProfileResponse,
+    DoctorPatientSummary,
+)
 from app.schemas.auth import (
     LoginRequest,
     MessageResponse,
@@ -23,9 +33,17 @@ from app.schemas.profile import (
 )
 
 __all__ = [
+    "AccessGrantListResponse",
+    "AccessGrantRequest",
+    "AccessGrantResponse",
     "ApiError",
     "DOCUMENT_CATEGORIES",
     "DocumentListResponse",
+    "DoctorDocumentDetailResponse",
+    "DoctorDocumentListResponse",
+    "DoctorPatientListResponse",
+    "DoctorPatientProfileResponse",
+    "DoctorPatientSummary",
     "GENDERS",
     "HealthResponse",
     "LoginRequest",

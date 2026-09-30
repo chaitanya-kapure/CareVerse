@@ -156,17 +156,59 @@ export interface DocumentUploadForm {
   document_date?: string;
 }
 
-// --- Phase 3: authorization + summary -----------------------------------
+// --- Phase 3: doctor access ---------------------------------------------
+//
+// One row in `patient_access`, as the patient who created it sees it. The
+// doctor side of the same relationship is `DoctorPatientSummary` below.
 
-export interface AuthorizedPatient {
+export type AccessStatus = "active" | "revoked";
+
+export interface AccessGrant {
   id: string;
   patient_id: string;
-  patient_name: string;
-  status: "active" | "revoked";
-  granted_at: string;
+  doctor_id: string;
+  doctor_name: string;
+  status: AccessStatus;
+  granted_at: string | null;
   revoked_at: string | null;
   note: string | null;
 }
+
+export interface AccessGrantListResponse {
+  items: AccessGrant[];
+  total: number;
+}
+
+export interface AccessGrantRequest {
+  doctor_id: string;
+  note?: string;
+}
+
+/**
+ * One row in the doctor's list of patients they may read.
+ *
+ * The doctor never receives a grant id, a note, or anything about the
+ * relationship's history -- only the patient themselves and what they would
+ * already see in their own profile. `document_count` is a count of stored
+ * files, not a clinical measure.
+ */
+export interface DoctorPatientSummary {
+  patient_id: string;
+  full_name: string;
+  date_of_birth: string | null;
+  gender: string;
+  document_count: number;
+  has_profile: boolean;
+}
+
+export interface DoctorPatientListResponse {
+  items: DoctorPatientSummary[];
+  total: number;
+}
+
+// --- Phase 4: AI summary (not implemented) ------------------------------
+// Declared ahead of the endpoints so the shape is settled. Nothing in the
+// app imports these yet, and no screen renders a summary.
 
 export interface SummarySection {
   key: string;

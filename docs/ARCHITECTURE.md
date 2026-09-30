@@ -42,8 +42,8 @@ adding any of them would require revisiting the medical-safety boundaries in
 │  hooks/useAuth · services/api (axios) · types · utils         │
 │  TanStack Query for server state                              │
 └───────────────────────────┬──────────────────────────────────┘
-                            │  HTTPS  Authorization: Bearer <JWT>
-                            │  Vite dev proxy: /api/* → :8000
+│  HTTPS  Authorization: Bearer <JWT>
+│  Vite dev proxy: /api/* → :8000
 ┌───────────────────────────▼──────────────────────────────────┐
 │  server/  FastAPI + Pydantic + PyMongo                       │
 │  ─────────────────────────────────────────────────────────    │
@@ -54,11 +54,11 @@ adding any of them would require revisiting the medical-safety boundaries in
 │  middlewares/  auth + authorization + error envelope          │
 │  schemas/      Pydantic validation (the "Zod" of this stack)  │
 └───────────────────────────┬──────────────────────────────────┘
-                            │
+│
                  ┌──────────▼──────────┐
-                 │  MongoDB            │
-                 │  storage/ (local FS)│
-                 │  AI provider (opt.) │
+│  MongoDB            │
+│  storage/ (local FS)│
+│  AI provider (opt.) │
                  └─────────────────────┘
 ```
 
@@ -132,6 +132,9 @@ careverse/
 │       │   ├── ui/               Button, Card, Field, Alert, Badge,
 │       │   │                     Spinner, EmptyState, PageHeader
 │       │   ├── ExtractionBadge.tsx  # completed / needs_ocr / failed
+│       │   ├── ExtractionPanel.tsx  # ★ patient + doctor extracted text
+│       │   ├── DocumentFileActions.tsx # ★ view/save original PDF
+│       │   └── DetailRow.tsx     # label/value pair
 │       │   ├── SafetyNotice.tsx
 │       │   └── PhasePlaceholder.tsx
 │       ├── context/
@@ -146,81 +149,93 @@ careverse/
 │       │   ├── LandingPage · LoginPage · RegisterPage · ForgotPasswordPage ·
 │       │   │   NotFoundPage
 │       │   ├── patient/  Dashboard · Profile · MedicalRecords ·
-│       │   │             UploadRecord · RecordDetails
+│       │   │             UploadRecord · RecordDetails · DoctorAccessManager
 │       │   └── doctor/   Dashboard · AuthorizedPatients ·
-│       │                 PatientDetails · PatientRecords · PatientSummary
+│       │                 PatientDetails · PatientRecords ·
+│       │                 PatientSummary (Phase 4 placeholder)
 │       ├── services/
 │       │   ├── api.ts            # axios instance + error normalization
 │       │   ├── auth.service.ts
 │       │   ├── profile.service.ts   # GET/PATCH /patients/me
-│       │   └── document.service.ts  # list / upload (FormData) / blob fetch
+│       │   ├── document.service.ts  # list / upload (FormData) / blob fetch
+│       │   ├── doctor.service.ts    # ★ authorized patients + their records
+│       │   └── access.service.ts    # ★ patient grants: list/grant/revoke
 │       ├── types/index.ts
 │       └── utils/
 │           ├── disclaimers.ts    # all medical-safety copy, one place
 │           ├── format.ts         # byte + date formatting, timezone-safe
-│           └── navigation.ts     # role → nav items
+│           ├── navigation.ts     # role → nav items
+│           └── query.ts         # retry policy: transient only, never a 4xx
 │
 └── server/
     ├── requirements.txt
     ├── .env.example
     ├── app/
-    │   ├── main.py               # app, lifespan, CORS, handlers
-    │   ├── config.py             # all env access
-    │   ├── database.py           # MongoManager + get_db()
-    │   ├── controllers/          # thin orchestration
-    │   │   ├── auth_controller.py
-    │   │   ├── patient_controller.py
-    │   │   ├── document_controller.py
-    │   │   └── health_controller.py
-    │   ├── middlewares/
-    │   │   ├── auth_middleware.py    # ★ security boundary
-    │   │   └── error_handler.py
-    │   ├── models/
-    │   │   ├── collections.py    # 6 collection names + accessors
-    │   │   ├── indexes.py        # startup index creation
-    │   │   ├── user.py
-    │   │   ├── patient_profile.py
-    │   │   ├── medical_document.py
-    │   │   ├── access.py
-    │   │   ├── patient_summary.py
-    │   │   └── password_reset.py
-    │   ├── routes/
-    │   │   ├── __init__.py       # router registry
-    │   │   ├── health.py
-    │   │   ├── auth.py
-    │   │   ├── patients.py       # /patients/me
-    │   │   └── documents.py      # /patients/me/documents
-    │   ├── schemas/              # Pydantic request/response
-    │   │   ├── auth.py
-    │   │   ├── common.py
-    │   │   ├── profile.py
-    │   │   └── documents.py
-    │   ├── services/
-    │   │   ├── auth_service.py
-    │   │   ├── email_service.py  # provider seam: mock | smtp | gmail
-    │   │   ├── password_reset_service.py  # OTP issue / verify / reset
-    │   │   ├── profile_service.py     # read/update, lazy row creation
-    │   │   ├── document_service.py    # ★ upload / read / delete pipeline
-    │   │   ├── storage.py             # StorageDriver seam + local driver
-    │   │   ├── extraction_service.py  # ★ pypdf → text, honest status
-    │   │   └── __init__.py       #   summary services (Phase 3)
-    │   └── utils/
-    │       ├── security.py       # bcrypt + JWT + OTP/reset-token hashing
-    │       └── errors.py         # error envelope helpers
+│   ├── main.py               # app, lifespan, CORS, handlers
+│   ├── config.py             # all env access
+│   ├── database.py           # MongoManager + get_db()
+│   ├── controllers/          # thin orchestration
+│   │   ├── auth_controller.py
+│   │   ├── patient_controller.py
+│   │   ├── document_controller.py
+│   │   ├── access_controller.py    # patient grants: list/grant/revoke
+│   │   ├── doctor_controller.py    # ★ reads, only after assert_patient_access
+│   ├── middlewares/
+│   │   ├── auth_middleware.py    # ★ security boundary
+│   │   └── error_handler.py
+│   ├── models/
+│   │   ├── collections.py    # 6 collection names + accessors
+│   │   ├── indexes.py        # startup index creation
+│   │   ├── user.py
+│   │   ├── patient_profile.py
+│   │   ├── medical_document.py
+│   │   ├── access.py
+│   │   ├── patient_summary.py      # Phase 4 — not yet created
+│   │   └── password_reset.py
+│   ├── routes/
+│   │   ├── __init__.py       # router registry
+│   │   ├── health.py
+│   │   ├── auth.py
+│   │   ├── patients.py       # /patients/me
+│   │   ├── documents.py      # /patients/me/documents
+│   │   ├── access.py         # /patients/me/access   (patient role)
+│   │   └── doctor.py         # ★ /doctor/patients     (doctor role)
+│   ├── schemas/              # Pydantic request/response
+│   │   ├── auth.py
+│   │   ├── common.py
+│   │   ├── profile.py
+│   │   ├── documents.py
+│   │   └── access.py         # grants + doctor reads (reuses Phase 2 shapes)
+│   ├── services/
+│   │   ├── auth_service.py
+│   │   ├── email_service.py  # provider seam: mock | smtp | gmail
+│   │   ├── password_reset_service.py  # OTP issue / verify / reset
+│   │   ├── profile_service.py     # read/update, lazy row creation
+│   │   ├── document_service.py    # ★ upload / read / delete pipeline
+│   │   ├── storage.py             # StorageDriver seam + local driver
+│   │   ├── extraction_service.py  # ★ pypdf → text, honest status
+│   │   ├── access_service.py      # ★ the only writer of patient_access
+│   │   ├── doctor_service.py      # ★ delegates to profile/document services
+│   │   └── summary_service.py     # Phase 4 — not yet created
+│   └── utils/
+│       ├── security.py       # bcrypt + JWT + OTP/reset-token hashing
+│       ├── errors.py         # error envelope helpers
+│       └── responses.py      # ★ shared PDF response (patient + doctor)
     ├── tests/                   # pytest; own careverse_test database
-    │   ├── conftest.py
-    │   ├── pdf_fixtures.py      # PDFs built in-process, never committed
-    │   ├── test_password_reset.py
-    │   ├── test_patient_profile.py
-    │   └── test_documents.py
-    ├── scripts/                  # seed/demo data (Phase 4)
+│   ├── conftest.py
+│   ├── pdf_fixtures.py      # PDFs built in-process, never committed
+│       ├── test_password_reset.py
+│       ├── test_patient_profile.py
+│       ├── test_documents.py
+│       └── test_doctor_access.py  # ★ the authorization matrix
+    ├── scripts/                  # seed/demo data (Phase 5)
     └── storage/
         └── documents/            # uploaded PDFs (gitignored)
 ```
 
 **Not yet created** (arrive with their phase, rather than as empty stubs):
 `hooks/useDocuments.ts`, the structured information-extractor that will sit
-behind `extraction_service`, and `services/summary_service.py`.
+behind `extraction_service`, and `services/summary_service.py` (Phase 4).
 
 ---
 
@@ -312,7 +327,7 @@ came from. This is what makes the summary auditable and lets the UI deep-link
 back into the document.
 
 **As built in Phase 2**, `extracted_text` is populated and `extracted_data` is
-still `{}`: the structured pass lands in Phase 3 with the summary that consumes
+still `{}`: the structured pass lands in Phase 4 with the summary that consumes
 it. The field exists now so no migration is needed when it does.
 
 ### `patient_access`
@@ -329,6 +344,16 @@ it. The field exists now so no migration is needed when it does.
 ```
 Index: `(doctor_id, patient_id)`. Grants are created by the **patient**
 (consent). There is no doctor-initiated request flow in the MVP.
+
+A second index, `uniq_active_doctor_patient`, is **unique over
+`(doctor_id, patient_id)` where `status == "active"`**. This is the
+database-level guarantee that the same pair cannot be authorized twice —
+a read-then-write in the service would not survive two concurrent requests,
+both of which would see "no grant yet" and both insert.
+
+It is partial rather than plain-unique on purpose: revoked rows are kept as
+an audit trail, so a plain unique index would make it impossible to grant
+the same doctor access a second time after a single revoke.
 
 ### `patient_summaries`
 ```jsonc
@@ -433,21 +458,39 @@ them, so there is no id in the request to change.
 | 🔒🛡 | GET | `/patients/me/documents/{documentId}` | patient | ✅ Phase 2 | Metadata + extracted data + text |
 | 🔒🛡 | DELETE | `/patients/me/documents/{documentId}` | patient | ✅ Phase 2 | Delete record + file |
 | 🔒🛡 | GET | `/patients/me/documents/{documentId}/file` | patient | ✅ Phase 2 | Stream the original PDF |
-| 🔒🛡 | GET | `/patients/me/summary` | patient | Phase 3 | Own generated summary |
-| 🔒🛡 | GET | `/patients/me/access` | patient | Phase 3 | Doctors currently authorized |
-| 🔒🛡 | POST | `/patients/me/access` | patient | Phase 3 | Grant a doctor (`doctor_id`) |
-| 🔒🛡 | DELETE | `/patients/me/access/{accessId}` | patient | Phase 3 | Revoke |
+| 🔒🛡 | GET | `/patients/me/summary` | patient | Phase 4 | Own generated summary |
+| 🔒🛡 | GET | `/patients/me/access` | patient | ✅ Phase 3 | Every grant issued, revoked included |
+| 🔒🛡 | POST | `/patients/me/access` | patient | ✅ Phase 3 | Authorize one doctor (`doctor_id`, optional `note`) |
+| 🔒🛡 | DELETE | `/patients/me/access/{accessId}` | patient | ✅ Phase 3 | Revoke |
 
 ### Doctor
-| Method | Path | Role | Purpose |
-|---|---|---|---|
-| 🔒🛡 | GET | `/doctor/patients` | doctor | Authorized patients **only** |
-| 🔒🛡 | GET | `/doctor/patients/{patientId}` | doctor | Patient basic info |
-| 🔒🛡 | GET | `/doctor/patients/{patientId}/documents` | doctor | Record list / timeline |
-| 🔒🛡 | GET | `/doctor/patients/{patientId}/documents/{documentId}` | doctor | One record's details |
-| 🔒🛡 | GET | `/doctor/patients/{patientId}/documents/{documentId}/file` | doctor | Stream original PDF |
-| 🔒🛡 | GET | `/doctor/patients/{patientId}/summary` | doctor | The AI summary ★ |
-| 🔒🛡 | POST | `/doctor/patients/{patientId}/summary/regenerate` | doctor | Force regeneration |
+All read-only. A doctor can read the records of patients who authorized them
+and can do nothing else to them — there is deliberately no doctor-side upload,
+edit or delete route.
+
+| Method | Path | Role | Status | Purpose |
+|---|---|---|---|---|
+| 🔒🛡 | GET | `/doctor/patients` | doctor | ✅ Phase 3 | Authorized patients **only**, with a record count |
+| 🔒🛡 | GET | `/doctor/patients/{patientId}` | doctor | ✅ Phase 3 | The patient's own profile, unchanged |
+| 🔒🛡 | GET | `/doctor/patients/{patientId}/documents` | doctor | ✅ Phase 3 | Record list, newest first |
+| 🔒🛡 | GET | `/doctor/patients/{patientId}/documents/{documentId}` | doctor | ✅ Phase 3 | One record, including extracted text |
+| 🔒🛡 | GET | `/doctor/patients/{patientId}/documents/{documentId}/file` | doctor | ✅ Phase 3 | Stream the original PDF |
+| 🔒🛡 | GET | `/doctor/patients/{patientId}/summary` | doctor | Phase 4 | The AI summary ★ |
+| 🔒🛡 | POST | `/doctor/patients/{patientId}/summary/regenerate` | doctor | Phase 4 | Force regeneration |
+
+The doctor's document responses are the **Phase 2 response models, unchanged**
+(`DocumentListResponse`, `MedicalDocumentDetailResponse`,
+`PatientProfileResponse`). A record a doctor reads and a record the patient
+reads are the same object, so there is no doctor-specific variant to audit and
+no way for the two to drift apart. The schemas in `schemas/access.py` are
+aliases, not redefinitions.
+
+The file route is the same handler logic as the patient's, refactored to share
+`utils/responses.pdf_response` so `Content-Disposition`, `X-Content-Type-Options`,
+`Content-Security-Policy` and `Cache-Control` are emitted from one place.
+There is one storage driver, one `DocumentService.read_file`, and one set of
+response headers — the doctor path is an authorization check in front of the
+existing read, not a second way to read a file.
 
 ### Error envelope
 Every failure, from every layer:
@@ -466,6 +509,11 @@ exception types, and nothing drawn from the document's contents.
 | Not your own patient record | 403 | `NOT_RECORD_OWNER` |
 | Doctor without a grant | 403 | `NO_PATIENT_ACCESS` |
 | Wrong role for the route | 403 | `ROLE_NOT_ALLOWED` |
+| Patient id in the path is malformed | 400 | `INVALID_PATIENT_ID` |
+| Granting an account against itself | 400 | `SELF_ACCESS_NOT_ALLOWED` |
+| Named doctor does not exist / is not a doctor | 404 | `DOCTOR_NOT_FOUND` |
+| Grant not found, or not the caller's | 404 | `ACCESS_NOT_FOUND` |
+| Doctor already authorized for this patient | 409 | `ACCESS_ALREADY_GRANTED` |
 | Body or form field invalid | 422 | `VALIDATION_ERROR` |
 | Upload is not a PDF by MIME | 415 | `UNSUPPORTED_FILE_TYPE` |
 | Upload claims PDF but is not | 400 | `INVALID_FILE_TYPE` |
@@ -591,6 +639,68 @@ Consequences that matter:
 
 Frontend `RequireAuth` is a UX convenience only. It is never the control.
 
+### How access is established — Phase 3
+
+The invariant is a single row:
+
+```
+doctor_id + patient_id  +  status == "active"
+```
+
+There is no other way in, and `assert_patient_access` is the only thing that
+reads it. Three endpoints, all on the **patient's** side:
+
+| Method | Path | What it does |
+|---|---|---|
+| `GET` | `/patients/me/access` | Every grant the caller has issued, revoked included |
+| `POST` | `/patients/me/access` | Authorize one `doctor_id` |
+| `DELETE` | `/patients/me/access/{accessId}` | Revoke |
+
+**The patient grants; the doctor never requests.** This is not a UI
+preference, it is the security model. A request flow means a doctor can *ask*
+for a patient's records, and every such system needs an approval queue, an
+expiry policy and an audit trail to stop the queue becoming a way to browse
+patient records. Starting from consent means the only way a grant appears is
+a patient naming a doctor.
+
+The direction is enforced by the routes, not by convention: they are mounted
+under `/patients/me` with `require_roles("patient")`, and the controller
+derives the patient id from the session via `assert_own_records`. There is no
+path segment, query parameter or body field through which a patient could name
+a *different* patient, so the endpoint cannot be used to grant access to
+somebody else's records even by mistake.
+
+**`AccessService` is the only module that writes to `patient_access`.** The
+doctor routes never create or modify a grant; they only ask whether one exists.
+One writer, one reader, one question.
+
+**Validation on the way in.** The named doctor must exist *and* have
+`role == "doctor"` (`404 DOCTOR_NOT_FOUND` for both cases, since the difference
+is not the caller's business). Without that check, a grant could be attached to
+a patient account, which would let one patient read another's records. An
+account cannot be authorized against itself
+(`400 SELF_ACCESS_NOT_ALLOWED`), so the doctor path can never be used to read
+its own records while bypassing the owner checks in the patient routes.
+
+**Revocation is part of the mechanism, not a later feature.** Access to medical
+records has to be withdrawable by the person whose records they are; a grant
+with no way to end it is a one-way door. Revoke sets `status = "revoked"` and
+stamps `revoked_at` rather than deleting the row, so "who had access in March"
+stays answerable. Because the grant row is re-read on every request, a revoked
+doctor is refused on their very next call — there is no cached grant to wait
+out.
+
+**Why there is no doctor directory.** The patient pastes the id of a doctor
+they already have a relationship with. A searchable roster of clinicians would
+be the obvious convenience and the wrong trade: it would let anyone with an
+account enumerate every doctor on the platform, and it is not needed by the
+workflow this phase supports. A patient who is seeing a doctor can get the id
+from them.
+
+**What is deliberately absent:** invitations, approval queues, request
+workflows, organizations, hospital tenancy, role hierarchies, per-field
+permissions, expiry, and any doctor-initiated write.
+
 ### Own-records routes (`/patients/me/*`) — Phase 2
 
 Every Phase 2 route is mounted under `/patients/me` and gated by
@@ -626,10 +736,55 @@ question is never asked, because the database cannot distinguish the two cases
 either. The status code is the access-control decision, not a detail added on
 top of one.
 
-`403 NOT_RECORD_OWNER` still exists in `assert_patient_access` for the
-`/patients/{patientId}` routes that Phase 3 adds: there the patient record
-itself was already proven to exist by the time the check runs, so nothing is
-being disclosed by the distinction.
+### Doctor routes — Phase 3
+
+Every doctor handler runs the same three steps, in this order:
+
+```python
+requested = resolve_patient_id(patient_id)   # 400 if not an ObjectId
+assert_patient_access(db, user, requested)   # 403 NO_PATIENT_ACCESS if no grant
+return DoctorService(db).get_patient_profile(requested)
+```
+
+The id is taken from the path, but it is **not used** until the check has
+passed, and the id used afterwards is the one that was checked. There is no
+route that loads the patient first and authorizes afterwards.
+
+**Why `403 NO_PATIENT_ACCESS` does not leak existence here.** The grant lookup
+queries `patient_access` and never consults the patient collection. A patient id
+that matches no account, and a patient id that matches a real patient this
+doctor was never granted, therefore produce a byte-identical `403`. A doctor
+learns only that they have no access — which is a fact about their own
+authorization, not about another person's account. The test
+`test_a_nonexistent_patient_id_answers_exactly_the_same` asserts the two
+responses are equal, not merely the same status.
+
+A malformed id is a `400 INVALID_PATIENT_ID` instead, and that difference is
+deliberate: it says the string is not an id, which reveals nothing about
+whether any id exists.
+
+**The patient list is the same rule applied as a set.** `AccessService
+.list_authorized_patient_ids` starts from `patient_access` and returns ids;
+only those are then loaded. No query in the project starts from the patient
+collection and filters by grant, because that shape is what becomes a
+directory. There is no endpoint that returns "patients matching X", and a
+doctor with zero grants gets `{"items": [], "total": 0}` — not a 403, because
+an empty authorized set is a successful answer, not a refused one.
+
+**Isolation between doctors** falls out of the same check: two doctors share
+nothing but the `patient_access` collection, so doctor B is refused for any
+patient whose grant names doctor A. `test_doctor_a_cannot_see_doctor_b_authorized_patients`
+and `test_doctor_b_cannot_read_the_patient_granted_to_doctor_a` cover it.
+
+**Documents are scoped twice.** Patient authorization runs first, so a doctor
+without a grant never reaches a document query. Then the document lookup is
+scoped by the authorized `patient_id`, so a valid document id belonging to a
+*different* patient is `404 DOCUMENT_NOT_FOUND` — identical to a document that
+does not exist.
+
+**Ownership is unchanged.** No doctor route writes. A doctor aiming a `DELETE`
+at a record gets `405`, and uploading to `/patients/me/documents` as a doctor
+gets `403 ROLE_NOT_ALLOWED`. The patient keeps full control of their files.
 
 ---
 
@@ -676,17 +831,17 @@ Implemented in `services/document_service.py` (the pipeline),
 
 ```
 POST /patients/me/documents  (multipart/form-data)
-  │
+│
   ├─ 1. cheap checks   filename present, MIME in ALLOWED_MIME_TYPES
-  │                    (415 UNSUPPORTED_FILE_TYPE)
+│                    (415 UNSUPPORTED_FILE_TYPE)
   ├─ 2. read capped    stream in 256 KB chunks, abort at MAX_UPLOAD_MB
-  │                    (413 FILE_TOO_LARGE) — nothing is stored on failure
+│                    (413 FILE_TOO_LARGE) — nothing is stored on failure
   ├─ 3. magic bytes    content must start with %PDF-  ← the extension lies
-  │                    (400 INVALID_FILE_TYPE)
+│                    (400 INVALID_FILE_TYPE)
   ├─ 4. store          driver.new_key() + driver.save() → opaque storage_key
-  │                    generated here, never taken from the upload
+│                    generated here, never taken from the upload
   ├─ 5. persist        medical_documents row, extraction_status="processing"
-  │                    rollback: if this insert fails, the file is deleted
+│                    rollback: if this insert fails, the file is deleted
   ├─ 6. extract        asyncio.to_thread(extraction_service.extract_text)
   ├─ 7. record outcome write extracted_text / page_count / extraction_status
   └─ 8. respond 201    the finished document, extraction already settled
@@ -777,11 +932,11 @@ The file is removed **first**, then the row. An orphaned row is a visible,
 retryable inconvenience; an orphaned copy of a medical document sitting on
 disk is neither.
 
-### Structured extraction — Phase 3
+### Structured extraction — Phase 4
 
 Deterministic, regex/heuristic based — **not** an LLM, so it is testable and
-reproducible. This phase stores the raw text only; the structured pass lands
-with the summary and is not yet written:
+reproducible. Phase 2 stores the raw text only; the structured pass lands with
+the summary in Phase 4 and is not yet written:
 
 - document date: date-like patterns near "date", "reported on"
 - lab values: `name  value unit (range)` with an abnormal flag when the value
@@ -801,13 +956,13 @@ in the uploaded records" propagates to the summary.
 
 ```
 SummaryService.regenerate(patient_id)
-  │
+│
   ├─ load documents for the patient
   ├─ select those with extraction_status == "completed"
-  │     (needs_ocr / failed are counted, never summarized)
+│     (needs_ocr / failed are counted, never summarized)
   ├─ build the provider input:
-  │     { profile, documents: [{ id, title, document_date,
-  │                              category, text, extracted_data }] }
+│     { profile, documents: [{ id, title, document_date,
+│                              category, text, extracted_data }] }
   ├─ provider = get_provider()          ← single switch point
   ├─ result = provider.generate(input)
   ├─ validate the shape (sections present, disclaimer intact)
@@ -937,18 +1092,71 @@ patient Dashboard, Profile, Medical Records, Upload and Record Details screens �
 sees the extracted text — **met and asserted end to end**, including the
 scanned-document and unreadable-PDF cases.
 
-Structured extraction (`extracted_data`) moves to Phase 3 with the summary that
+Structured extraction (`extracted_data`) moves to Phase 4 with the summary that
 consumes it; storing raw text alone is sufficient until then, and leaves nothing
 unread.
 
-### Phase 3 — Authorization & AI summary
-Patient grants/revokes doctor access · `assert_patient_access` wired into
-every doctor route · doctor authorized-patients list · patient detail/records/
-summary screens · provider abstraction + mock summarizer + real provider ·
-source-linked summary rendering with the disclaimer.
-**Exit criteria:** the full §16 demo flow runs end to end.
+### Phase 3 — Doctor access & authorized records ✅
+Delivered as **access only**. The AI summary was split out into Phase 4 rather
+than bundled here, because authorizing and reading a patient's records is a
+different problem from interpreting them, and the access layer has to be
+correct on its own before anything is generated from it.
 
-### Phase 4 — Demo hardening
+*Backend* — `AccessService` as the sole writer of `patient_access` ·
+partial unique index `uniq_active_doctor_patient` over
+`(doctor_id, patient_id) where status == "active"` so a pair cannot be
+authorized twice, while revoked rows survive as an audit trail · patient-side
+`GET`/`POST`/`DELETE /patients/me/access` · `DoctorService` composing the
+existing `ProfileService` and `DocumentService` rather than re-querying ·
+`DoctorController` running `resolve_patient_id` → `assert_patient_access` →
+read, in that order, on all five doctor routes · `utils/responses.pdf_response`
+extracted from the Phase 2 document controller so the doctor's file route emits
+identical `Content-Disposition`, `nosniff`, CSP and `no-store` headers from one
+implementation · five read-only doctor routes.
+
+*Frontend* — `ExtractionPanel`, `DocumentFileActions` and `DetailRow` extracted
+from the Phase 2 record screen and reused by the doctor screens, so a report
+cannot read one way to the patient who uploaded it and another to the clinician
+they authorized · doctor Dashboard, Authorized Patients, Patient Details and
+record view · patient-side authorize/revoke panel wired to the dashboard count
+that previously read "Available in Phase 3" · the dead route
+`/doctor/patients/:patientId/records` (no document id, so it named nothing)
+repurposed as the record view `/doctor/patients/:patientId/records/:documentId` ·
+the two dead `DOCTOR_NAV` links (`/doctor/patients/records`,
+`/doctor/patients/summary`), which had no patient id and so could never resolve,
+removed from the sidebar.
+
+*Two things the client had to get right about refusals.* A React Query
+observation is **pending but idle** on its first render, so a guard written as
+`isLoading` (which is `isPending && isFetching`) falls straight through to the
+success path and briefly renders a fully "not recorded" patient to a doctor who
+simply has not loaded yet — the doctor pages branch on `isError`, then
+`isPending`. And a `403 NO_PATIENT_ACCESS` is **never** retried
+(`client/src/utils/query.ts`): it is a decision the server reached deliberately
+and will reach identically on the next attempt, so retrying only doubles the
+requests made against the authorization endpoint and delays the refusal message
+behind a spinner. Only a missing response or a 5xx is retried, once.
+
+*Tests* — 35 new API-level tests (117 total), covering unauthenticated 401,
+wrong-role 403, ungranted 403, byte-identical responses for "ungranted" and
+"nonexistent" patient ids, doctor A vs doctor B isolation, authorized profile /
+list / detail / extracted text / PDF stream, and the four IDOR cases
+(unauthorized list, retrieve, extracted text, and file).
+
+**Exit criteria:** a patient authorizes a doctor, the doctor sees exactly that
+patient, opens a record, reads the extracted text and downloads the original
+PDF — **met and asserted end to end at the API boundary**, including that the
+doctor still cannot upload, edit or delete.
+
+### Phase 4 — AI summary
+Provider abstraction + mock summarizer + real provider · structured extraction
+(`extracted_data`) with source links · `/patients/me/summary` and
+`/doctor/patients/{patientId}/summary` with the disclaimer · source-linked
+summary rendering. **Not started.** `/doctor/patients/:patientId/summary` renders
+a `PhasePlaceholder` that says so; nothing in the app imports the
+`PatientSummary` type.
+
+### Phase 5 — Demo hardening
 Seed script with synthetic demo patients, records and grants (clearly
 labelled, in `scripts/` only) · empty/loading/error state pass · responsive +
 accessibility pass on the doctor patient-detail screen · README demo script.
@@ -965,3 +1173,8 @@ honestly: `needs_ocr`, no invented text, the original still downloadable. An
 OCR provider is a later branch behind the same `extract_text()` seam — it is
 excluded because a wrong OCR read would enter the summary as a clinical fact,
 which is worse than an honest "needs_ocr".
+
+The same reasoning is why Phase 3 shipped no AI summary. Nothing in this phase
+interprets a record: the doctor list carries a name, a date of birth and a count
+of uploaded files, and that is all. A count of PDFs is a fact about the file
+store, not a statement about a patient.

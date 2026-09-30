@@ -7,6 +7,7 @@ import Alert from "../../components/ui/Alert";
 import Button from "../../components/ui/Button";
 import Spinner from "../../components/ui/Spinner";
 import { Select, Textarea, TextInput } from "../../components/ui/Field";
+import DoctorAccessManager from "./DoctorAccessManager";
 import { profileService } from "../../services/profile.service";
 import { getErrorMessage } from "../../services/api";
 import type { PatientProfile, PatientProfileUpdate } from "../../types";
@@ -131,7 +132,7 @@ export default function PatientProfilePage() {
         <Card
           title="Basic details"
           description="Keep these current so your records are identifiable."
-          footer="Nothing here is shared with a doctor unless you grant access in a later phase."
+          footer="Nothing here is shared with a doctor unless you authorize them below."
         >
           <div className="grid gap-4 sm:grid-cols-2">
             <TextInput
@@ -194,6 +195,8 @@ export default function PatientProfilePage() {
           </div>
         </Card>
       </form>
+
+      <DoctorAccessManager />
     </>
   );
 }

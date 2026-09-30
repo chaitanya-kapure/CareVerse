@@ -61,7 +61,9 @@ export default function App() {
             <Route path="records/:documentId" element={<RecordDetailsPage />} />
           </Route>
 
-          {/* Doctor */}
+          {/* Doctor. `RequireAuth` is a UX guard only -- every screen below
+              also calls a doctor-scoped endpoint that re-checks the role and
+              the patient grant on the server. */}
           <Route
             path="/doctor"
             element={
@@ -73,7 +75,10 @@ export default function App() {
             <Route index element={<DoctorDashboardPage />} />
             <Route path="patients" element={<AuthorizedPatientsPage />} />
             <Route path="patients/:patientId" element={<PatientDetailsPage />} />
-            <Route path="patients/:patientId/records" element={<PatientRecordsPage />} />
+            <Route
+              path="patients/:patientId/records/:documentId"
+              element={<PatientRecordsPage />}
+            />
             <Route path="patients/:patientId/summary" element={<PatientSummaryPage />} />
           </Route>
 

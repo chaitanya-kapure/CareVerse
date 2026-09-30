@@ -7,6 +7,7 @@ import Card from "../../components/ui/Card";
 import Button from "../../components/ui/Button";
 import ExtractionBadge from "../../components/ExtractionBadge";
 import { documentService } from "../../services/document.service";
+import { accessService } from "../../services/access.service";
 import type { ExtractionStatus } from "../../types";
 
 const NEXT_STEPS = [
@@ -41,8 +42,16 @@ export default function PatientDashboardPage() {
     queryFn: documentService.list,
   });
 
+  // Also the same query key the access manager on the profile page uses.
+  // Revoking a doctor there updates this number without a refetch of its own.
+  const { data: access } = useQuery({
+    queryKey: ["patient-access"],
+    queryFn: accessService.list,
+  });
+
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
+  const activeGrants = (access?.items ?? []).filter((entry) => entry.status === "active").length;
 
   // "Completed" is the only outcome where text was actually read. Anything
   // else is worth the patient knowing about without them having to open
@@ -92,8 +101,16 @@ export default function PatientDashboardPage() {
         </Card>
 
         <Card title="Doctors with access" description="Only doctors you authorize.">
-          <p className="text-2xl font-semibold text-slate-900">-</p>
-          <p className="mt-1 text-sm text-slate-500">Available in Phase 3</p>
+          <p className="text-2xl font-semibold text-slate-900">
+            {access ? activeGrants : "-"}
+          </p>
+          <p className="mt-1 text-sm text-slate-500">
+            {access
+              ? activeGrants === 0
+                ? "Your records are readable only by you"
+                : "Manage or revoke access from your profile"
+              : "Loading"}
+          </p>
         </Card>
       </div>
 

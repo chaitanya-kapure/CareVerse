@@ -11,6 +11,7 @@ import logging
 from pymongo.database import Database
 from pymongo.errors import OperationFailure
 
+from app.models import access
 from app.models import collections as c
 
 logger = logging.getLogger(__name__)
@@ -43,10 +44,30 @@ def ensure_indexes(db: Database) -> None:
         ),
     )
 
+    # The authorization lookup: "is this doctor allowed to read this patient?"
+    # One indexed read, and the index is unique over live grants so the same
+    # pair cannot be authorized twice.
     _safe(
         db,
         lambda: db[c.PATIENT_ACCESS].create_index(
-            [("doctor_id", 1), ("patient_id", 1)], name="doctor_patient_pair"
+            list(access.UNIQUE_ACTIVE_GRANT_KEYS),
+            name="doctor_patient_pair",
+        ),
+    )
+    _safe(
+        db,
+        lambda: db[c.PATIENT_ACCESS].create_index(
+            list(access.UNIQUE_ACTIVE_GRANT_KEYS),
+            name=access.UNIQUE_ACTIVE_GRANT_INDEX,
+            unique=True,
+            partialFilterExpression=access.UNIQUE_ACTIVE_GRANT_FILTER,
+        ),
+    )
+    # Listing a patient's own grants, and showing the doctor their history.
+    _safe(
+        db,
+        lambda: db[c.PATIENT_ACCESS].create_index(
+            [("patient_id", 1), ("granted_at", -1)], name="patient_grants_recent"
         ),
     )
 

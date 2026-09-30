@@ -4,8 +4,6 @@ Every method starts with `assert_own_records`, which returns the id all
 subsequent queries are scoped by. Nothing here decides ownership for itself.
 """
 
-from urllib.parse import quote
-
 from fastapi import Response, UploadFile
 from pydantic import ValidationError
 
@@ -15,6 +13,7 @@ from app.models.user import UserDocument
 from app.schemas.documents import UploadMeta
 from app.services.document_service import DocumentService
 from app.utils import errors
+from app.utils.responses import pdf_response
 
 
 class DocumentController:
@@ -70,31 +69,7 @@ class DocumentController:
         mime, filename, content = DocumentService(db).read_file(
             patient_id, document_id
         )
-
-        # `inline` so the patient can actually read their own record in the
-        # browser. The client's download button sets `download` itself.
-        ascii_fallback = "".join(
-            char if 32 <= ord(char) < 127 and char not in '"\\' else "_"
-            for char in filename
-        ) or "document.pdf"
-        disposition = (
-            f'inline; filename="{ascii_fallback}"; '
-            f"filename*=UTF-8''{quote(filename, safe='')}"
-        )
-
-        return Response(
-            content=content,
-            media_type=mime,
-            headers={
-                "Content-Disposition": disposition,
-                # PDFs can contain active content; refuse to let one act
-                # against CAREVERSE's own origin if it is ever rendered here.
-                "X-Content-Type-Options": "nosniff",
-                "Content-Security-Policy": "default-src 'none'; object-src 'self'",
-                # Always re-fetched rather than cached off-device.
-                "Cache-Control": "private, no-store",
-            },
-        )
+        return pdf_response(content, mime, filename)
 
     @staticmethod
     async def delete_document(document_id: str, user: UserDocument) -> dict:
