@@ -19,5 +19,5 @@ python-jose[cryptography]==3.3.0
 # --- Document pipeline (Phase 2) ----------------------------------------
 pypdf==5.1.0                     # pure-python PDF text extraction, no native deps
 
-# --- AI provider client (Phase 3) ---------------------------------------
+# --- AI provider client (Phase 4B) --------------------------------------
 httpx==0.28.1

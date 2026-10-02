@@ -50,7 +50,9 @@ class Settings(BaseSettings):
     max_upload_mb: int = 15
     allowed_mime_types: str = "application/pdf"
 
-    # --- AI summarization (Phase 3) -------------------------------------
+    # --- AI summarization (Phase 4B) ------------------------------------
+    # Declared but NOT yet read by any code: there is no AI provider and no
+    # summary endpoint. Phase 4A is fully deterministic and needs no key.
     # Leave AI_API_KEY empty to run the deterministic mock summarizer.
     ai_provider: str = "mock"
     ai_api_key: str = ""

@@ -301,7 +301,42 @@ def test_a_patient_can_open_their_own_document(client, patient, storage):
     assert body["id"] == created["id"]
     assert body["extraction_status"] == "completed"
     assert "Haemoglobin 14.2 g/dL" in body["extracted_text"]
-    assert body["extracted_data"] == {}
+
+    # Phase 4A. This used to assert `extracted_data == {}`, which recorded the
+    # pre-Phase-4A state rather than a property worth keeping: the structured
+    # pass is the point of this phase, so that assertion could only have held
+    # if the feature did nothing. It is replaced with a stronger one that
+    # pins the actual lab values, their units, and their source attribution --
+    # and, just as importantly, pins the absence of a `flag`, because nothing
+    # on this report marks any value as abnormal and the extractor must not
+    # decide that for itself.
+    extracted = body["extracted_data"]
+    assert extracted["lab_values"] == [
+        {
+            "name": "Haemoglobin",
+            "value": "14.2",
+            "unit": "g/dL",
+            "source_text": "Haemoglobin 14.2 g/dL",
+        },
+        {
+            "name": "Platelets",
+            "value": "250000",
+            "unit": "/uL",
+            "source_text": "Platelets 250000 /uL",
+        },
+    ]
+    # No condition, finding, medication, or metadata was printed on this
+    # report, so none may appear.
+    for absent in (
+        "stated_conditions",
+        "abnormal_findings",
+        "medications",
+        "report_title",
+        "document_date",
+        "referring_facility",
+        "referring_doctor",
+    ):
+        assert absent not in extracted, f"{absent} was not stated on this report"
 
 
 def test_the_original_file_streams_back_byte_for_byte(client, patient, storage, db):

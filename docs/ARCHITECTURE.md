@@ -190,7 +190,7 @@ careverse/
 │   │   ├── patient_profile.py
 │   │   ├── medical_document.py
 │   │   ├── access.py
-│   │   ├── patient_summary.py      # Phase 4 — not yet created
+│   │   ├── patient_summary.py      # summary shape (Phase 4B consumes it)
 │   │   └── password_reset.py
 │   ├── routes/
 │   │   ├── __init__.py       # router registry
@@ -216,7 +216,8 @@ careverse/
 │   │   ├── extraction_service.py  # ★ pypdf → text, honest status
 │   │   ├── access_service.py      # ★ the only writer of patient_access
 │   │   ├── doctor_service.py      # ★ delegates to profile/document services
-│   │   └── summary_service.py     # Phase 4 — not yet created
+│   │   ├── structured_extraction.py  # ★ Phase 4A: text → ExtractedData, pure
+│   │   └── summary_service.py     # Phase 4B — not yet created
 │   └── utils/
 │       ├── security.py       # bcrypt + JWT + OTP/reset-token hashing
 │       ├── errors.py         # error envelope helpers
@@ -227,7 +228,8 @@ careverse/
 │       ├── test_password_reset.py
 │       ├── test_patient_profile.py
 │       ├── test_documents.py
-│       └── test_doctor_access.py  # ★ the authorization matrix
+│       ├── test_doctor_access.py  # ★ the authorization matrix
+│       └── test_structured_extraction.py  # ★ Phase 4A, incl. the no-inference cases
     ├── scripts/                  # seed/demo data (Phase 5)
     └── storage/
         └── documents/            # uploaded PDFs (gitignored)
@@ -326,9 +328,11 @@ Every entry in `extracted_data` carries `source_text` — the literal line it
 came from. This is what makes the summary auditable and lets the UI deep-link
 back into the document.
 
-**As built in Phase 2**, `extracted_text` is populated and `extracted_data` is
-still `{}`: the structured pass lands in Phase 4 with the summary that consumes
-it. The field exists now so no migration is needed when it does.
+**As built in Phase 4A**, `extracted_text` is populated by the Phase 2 text
+extractor, and `extracted_data` is populated from it by the deterministic
+structured pass described in §8. Both are stored on the document at upload time.
+There is no AI in this path and no summary is generated from it yet — that is
+Phase 4B.
 
 ### `patient_access`
 ```jsonc
@@ -932,23 +936,168 @@ The file is removed **first**, then the row. An orphaned row is a visible,
 retryable inconvenience; an orphaned copy of a medical document sitting on
 disk is neither.
 
-### Structured extraction — Phase 4
+### Structured extraction — Phase 4A ✅
 
-Deterministic, regex/heuristic based — **not** an LLM, so it is testable and
-reproducible. Phase 2 stores the raw text only; the structured pass lands with
-the summary in Phase 4 and is not yet written:
+Implemented in `server/app/services/structured_extraction.py` as a single pure
+function:
 
-- document date: date-like patterns near "date", "reported on"
-- lab values: `name  value unit (range)` with an abnormal flag when the value
-  falls outside the stated range, or a neighbouring `H/L/*` marker
-- medications: drug-name + dose + frequency patterns in prescription contexts
-- abnormal findings: **verbatim sentences** containing abnormal markers
-  (elevated, low, positive, abnormal, raised…) — quoted, never paraphrased
-- stated conditions: sentences naming a condition **already diagnosed
-  elsewhere** — CAREVERSE records them; it does not infer them
+```python
+extract_structured(text: str) -> ExtractedData
+```
+
+Deterministic, regex/pattern based — **not** an LLM, so it is testable and
+reproducible. The same text always produces the same structure. The function
+has no database access, no HTTP, no external API, and never raises.
+
+It runs at upload, inside the same `asyncio.to_thread` as the text extraction,
+and only when `extraction_status == "completed"` with non-empty text:
+
+```
+PDF → extraction_service.extract_text() → if completed:
+        structured_extraction.extract_structured() → extracted_data
+```
+
+No new collection and no migration: the result is written into the existing
+`medical_documents.extracted_data` field in the same single `$set` that already
+stored `extracted_text`.
+
+**Why this is a separate phase from the summary.** A summarizer handed 500,000
+characters of raw clinical prose has to decide what it is looking at. One
+handled structured, source-attributed facts does not. Everything that can be
+established deterministically is established here first, so that nothing which
+can be *checked* is left to be *guessed*.
+
+#### Categories
+
+| Field | Extracted when |
+|---|---|
+| `report_title` | An explicit label — `Report:`, `Test Name:`, `Investigation:` |
+| `document_date` | An explicit date label — `Report Date:`, `Reported on:`, `Collected:` |
+| `referring_facility` | An explicit label — `Hospital:`, `Clinic:`, `Laboratory:` |
+| `referring_doctor` | An explicit label — `Referring Doctor:`, `Reported by:`, `Dr:` |
+| `lab_values` | A `name value [unit] [(range)] [marker]` row |
+| `medications` | A drug name plus a dosage form or an administration frequency |
+| `abnormal_findings` | An explicit marker, or a labelled findings section |
+| `stated_conditions` | An explicit statement phrase — `History of`, `Diagnosis:`, `Known` |
+
+Each of the four metadata fields requires a printed label. There is no heading
+heuristic and no positional guess: "the first line" is where a letterhead lives
+on one document and where a patient's name lives on another, and telling those
+apart is inference. A field with no label is **absent from the result**.
 
 Anything not found is simply omitted from the result, which is how "not found
-in the uploaded records" propagates to the summary.
+in the uploaded records" propagates to the summary. Absent keys are the
+representation — not present-and-null — so a reader never has to distinguish
+"empty" from "unknown".
+
+#### The lab `flag` rule — transcribed, never computed
+
+> **`flag` is populated only when an explicit flag or marker is present in the
+> source document.** `H`, `L`, `*`, `(High)`, `Elevated`, `Critical`. It is
+> **never** derived by comparing a value to its reference range, even when that
+> range is printed in the text.
+
+This is deliberately narrower than an earlier draft of this document, which
+proposed deriving the flag from the range. Comparing a number to a range is an
+*interpretation*, and an interpretation is exactly what this layer exists to
+avoid. It would also be fragile: `<5`, `>180` and `70-99` are not the same
+shape of claim as `12-16`, and a mistaken "high" would enter a future summary
+as a clinical fact.
+
+`Glucose: 126 mg/dL` therefore yields **no** `flag` at all. So does
+`Haemoglobin 14.2 g/dL (12.0-15.0)` — silence is the honest answer, because a
+`normal` flag on every in-range value would be a claim the document never made.
+`Haemoglobin 8.2 g/dL (12.0-15.0) L` yields `flag: "low"` solely because of the
+printed `L`.
+
+#### Abnormal findings — two mechanisms only
+
+1. **Explicit markers.** Verbatim sentences containing `abnormal`, `elevated`,
+   `raised`, `high`, `increased`, `decreased`, `reduced`, `low`, `positive`,
+   `critical`, `out of range`, `below range`, `above range`. `high` and `low`
+   additionally require a measurement-like context (`BP is high`, `140 high`,
+   `low count`) so that `low back pain` is not read as an abnormal result.
+
+   `negative` is deliberately **excluded**. In a lab or radiology report it is
+   overwhelmingly a statement of normality — `all negative` — and treating it as
+   abnormal would invert the document's meaning. It is still recorded where it
+   belongs: as the *value* of a qualitative result (`CRP: Negative`).
+
+2. **Findings sections.** Sentences under a heading that labels them as
+   findings — `Findings:`, `Impression:`, `Abnormal Findings:`, `Findings /
+   Impression:`, `Comments:`, `Conclusion:`, `Observations:` — in either the
+   two-line or the inline (`Impression: …`) form. The document has already made
+   the judgement; the text is quoted, never reinterpreted.
+
+   Sentences the document itself marks as normal (`no acute abnormality`,
+   `unremarkable`, `within normal limits`, `negative for`) are suppressed even
+   under such a heading, because recording them would be a false claim in the
+   other direction.
+
+There is deliberately no third mechanism. `Chest X-ray shows consolidation.`
+in arbitrary prose is **not** captured, because deciding that consolidation is
+abnormal is a clinical judgement this layer is not allowed to make. Printed
+under `Findings:`, it is captured as a quote. This is a known recall limit, and
+the marker vocabulary is never widened with medical terms to compensate.
+
+#### The no-inference rule
+
+There is no path from a lab value, a medication, or a finding to a condition
+name. `Glucose: 126 mg/dL` cannot produce `diabetes` no matter what else is on
+the page, because every condition pattern requires an explicit statement
+phrase. Lines that deny having the thing they go on to mention (`no known
+chronic conditions`) are rejected outright.
+
+Nothing in this module assesses danger, recommends treatment or medication,
+judges whether a medication is appropriate, or determines whether a record is
+diagnostic.
+
+#### Document date
+
+Only unambiguous forms are accepted: ISO `YYYY-MM-DD` / `YYYY/MM/DD`, plus
+`DD/MM/YYYY` **only** when the leading component exceeds 12, which proves it is
+a day. `03/04/2025` is refused rather than resolved to one of two readings, and
+every candidate is then checked against the real calendar so `2026-02-30` is
+rejected rather than rolled over. Lines with a birth context are skipped.
+
+A `document_date` the patient typed at upload is the document's date of record
+and lives on the document row. `extracted_data.document_date` is a *separate*
+reading of what the file says and never overwrites it. Both are recorded.
+
+#### `needs_ocr` and `failed`
+
+Neither status reaches the structured pass. A document with no extractable text
+has nothing to structure, and there is no branch that could build
+`extracted_data` out of a status or a filename. Both keep `extracted_data = {}`
+exactly as in Phase 2 — which is what lets a later summary tell "no facts
+found" apart from "this record was never readable".
+
+#### Failure behaviour
+
+Every category pass is individually guarded, so a parser bug costs one category
+its results rather than all of them. A total failure degrades to `{}`. Nothing
+here raises, because an exception would turn a successfully extracted document
+into a failed upload — precisely the coupling the pipeline avoids. Only the
+exception *type* is logged; a parse failure message routinely embeds the line
+that failed, which is document content.
+
+#### Bounds
+
+Bounded by construction, so a hostile or merely enormous document cannot produce
+an unbounded structure:
+
+| Constant | Value | Bounds |
+|---|---|---|
+| `MAX_INPUT_CHARS` | 500,000 | Input text (mirrors `MAX_EXTRACTED_CHARS`) |
+| `MAX_LINES` | 20,000 | Lines read |
+| `MAX_LAB_VALUES` / `MAX_MEDICATIONS` / `MAX_ABNORMAL_FINDINGS` / `MAX_STATED_CONDITIONS` | 200 each | Output per category |
+| `MAX_SOURCE_TEXT_CHARS` | 300 | A line longer than this is **skipped**, not truncated |
+| `MAX_NAME_CHARS` / `MAX_VALUE_CHARS` / `MAX_CONDITION_CHARS` | 60 / 40 / 120 | Individual fields |
+
+`source_text` must be verbatim, so an over-long line is skipped rather than
+clipped — a quote that stops mid-sentence is worse than no quote. No Phase 2
+limit is widened: a document refused for having too many pages is refused for
+exactly the same reason and never reaches this pass.
 
 ---
 
@@ -1092,9 +1241,9 @@ patient Dashboard, Profile, Medical Records, Upload and Record Details screens �
 sees the extracted text — **met and asserted end to end**, including the
 scanned-document and unreadable-PDF cases.
 
-Structured extraction (`extracted_data`) moves to Phase 4 with the summary that
-consumes it; storing raw text alone is sufficient until then, and leaves nothing
-unread.
+Structured extraction (`extracted_data`) shipped separately as **Phase 4A**,
+ahead of the summary that consumes it. Storing raw text alone was sufficient
+until then, and left nothing unread.
 
 ### Phase 3 — Doctor access & authorized records ✅
 Delivered as **access only**. The AI summary was split out into Phase 4 rather
@@ -1148,11 +1297,35 @@ patient, opens a record, reads the extracted text and downloads the original
 PDF — **met and asserted end to end at the API boundary**, including that the
 doctor still cannot upload, edit or delete.
 
-### Phase 4 — AI summary
-Provider abstraction + mock summarizer + real provider · structured extraction
-(`extracted_data`) with source links · `/patients/me/summary` and
-`/doctor/patients/{patientId}/summary` with the disclaimer · source-linked
-summary rendering. **Not started.** `/doctor/patients/:patientId/summary` renders
+### Phase 4A — Deterministic structured extraction ✅
+`structured_extraction.extract_structured(text) -> ExtractedData` as a pure,
+bounded, exception-safe function — no LLM, no network, no database · eight
+categories: four labelled metadata fields plus `lab_values`, `medications`,
+`abnormal_findings`, `stated_conditions` · the `flag` rule transcribed rather
+than computed (§8) · findings-section capture for lines the document itself
+labelled as findings · source attribution on every fact · absent keys rather
+than nulls · per-category output caps · wired into `document_service.upload()`
+inside the existing `asyncio.to_thread`, and only for
+`extraction_status == "completed"`, so `needs_ocr` and `failed` keep
+`extracted_data = {}` exactly as in Phase 2 · the Phase 2 assertion
+`extracted_data == {}` in `test_documents.py` replaced with a stronger one that
+pins the real lab values · 101 new tests.
+
+**Exit criteria:** an uploaded PDF with extractable text receives populated
+`extracted_data`; `Glucose: 126 mg/dL` never becomes a condition, a flag, or a
+diagnosis — **met and asserted**, along with the `needs_ocr` and `failed` paths
+and the Phase 4A determinism and bounds properties.
+
+**Why this is not the summary.** Nothing in this phase generates prose. There is
+no `SummaryService`, no AI provider, and no LLM call. The frontend is
+untouched, `/doctor/patients/:patientId/summary` still renders a
+`PhasePlaceholder`, and `httpx` remains installed but unused for AI.
+
+### Phase 4B — AI summary
+Provider abstraction + mock summarizer + real provider ·
+`/patients/me/summary` and `/doctor/patients/{patientId}/summary` with the
+disclaimer · source-linked summary rendering over the `extracted_data` Phase 4A
+already produced. **Not started.** `/doctor/patients/:patientId/summary` renders
 a `PhasePlaceholder` that says so; nothing in the app imports the
 `PatientSummary` type.
 
@@ -1178,3 +1351,10 @@ The same reasoning is why Phase 3 shipped no AI summary. Nothing in this phase
 interprets a record: the doctor list carries a name, a date of birth and a count
 of uploaded files, and that is all. A count of PDFs is a fact about the file
 store, not a statement about a patient.
+
+It is also why Phase 4A is deterministic rather than a first AI pass. A pattern
+that mis-parses is a wrong fact that a test can catch and a review can trace. A
+model that mis-parses is a wrong fact that arrives with a confident tone and no
+traceable source, which in a health-records system is the worst possible
+failure mode. Everything that can be established by reading what the document
+actually says should be established that way first.

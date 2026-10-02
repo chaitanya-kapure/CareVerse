@@ -41,7 +41,8 @@ from app.config import settings
 from app.models.collections import get_medical_documents
 from app.models.medical_document import MedicalDocumentDocument, serialize_document
 from app.schemas.documents import UploadMeta
-from app.services import extraction_service
+from app.services import extraction_service, structured_extraction
+from app.services.extraction_service import ExtractionOutcome
 from app.services.storage import StorageDriver, StorageError, get_storage_driver
 from app.utils import errors
 
@@ -160,8 +161,10 @@ class DocumentService:
 
         # --- 3. extract ------------------------------------------------
         # Off the event loop: pypdf is CPU-bound and parses an untrusted
-        # file, so one crafted PDF must not stall every other request.
-        outcome = await asyncio.to_thread(extraction_service.extract_text, content)
+        # file, so one crafted PDF must not stall every other request. The
+        # structured pass runs in the same thread for the same reason -- it is
+        # regex work over that same text, on up to 500,000 characters of it.
+        outcome = await asyncio.to_thread(_extract_text_and_structure, content)
 
         # A failure here still returns the document. It is recorded as
         # `failed` and the upload succeeds -- see the module docstring.
@@ -275,6 +278,33 @@ class DocumentService:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _extract_text_and_structure(content: bytes) -> ExtractionOutcome:
+    """Text first, and only then structured facts.
+
+    The ordering is the safety property, not an implementation detail. A
+    document that came back `needs_ocr` or `failed` has no text to read, so
+    this returns before the structured pass is ever reached -- there is no
+    branch anywhere that could build `extracted_data` out of a status or a
+    filename. Those documents keep `extracted_data = {}` exactly as they did
+    in Phase 2, and a future summary can tell "no facts found" apart from
+    "this record was never readable".
+
+    A document that extracted cleanly but contains nothing this parser
+    recognises also ends up with `{}`. That is the same distinction, and it is
+    why this must not raise: a parser that could not find a lab value has not
+    failed to extract a lab value, and must not turn a stored document into a
+    failed upload by saying so.
+    """
+    outcome = extraction_service.extract_text(content)
+    if outcome.get("extraction_status") != "completed":
+        return outcome
+
+    outcome["extracted_data"] = structured_extraction.extract_structured(
+        outcome.get("extracted_text") or ""
+    )
+    return outcome
 
 
 def _safe_filename(name: str) -> str:
