@@ -39,6 +39,7 @@ export default function SummarySectionCard({
 }: SummarySectionCardProps) {
   const isEmpty = section.items.length === 0;
   const note = section.empty_note ?? EMPTY_SECTION_NOTE;
+  const count = section.items.length;
 
   return (
     <Card
@@ -46,7 +47,9 @@ export default function SummarySectionCard({
       description={
         isEmpty
           ? undefined
-          : `${section.items.length} item${section.items.length === 1 ? "" : "s"}, each copied from a record.`
+          : count === 1
+            ? "1 item, copied from a record."
+            : `${count} items, each copied from a record.`
       }
     >
       {isEmpty ? (

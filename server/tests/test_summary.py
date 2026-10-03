@@ -1188,6 +1188,26 @@ def test_nothing_in_the_claims_is_interpreted(client, patient):
         assert forbidden not in text, forbidden
 
 
+def test_the_summary_never_prints_a_stored_enum(client, patient):
+    """A clinician reads prose, not database values.
+
+    The category is a `Literal` the patient picked at upload time; printing
+    `lab_report` inside a sentence reads like a debugging artifact and, worse,
+    invites a reader to treat a storage value as if it were a clinical label.
+    Every screen that shows this word shows "Lab report", and the summary has
+    to agree with them.
+    """
+    upload(client, patient, RICH_REPORT, category="lab_report")
+
+    body = own_summary(client, patient).json()
+
+    assert "lab_report" not in claims_text(body), "the stored enum leaked"
+    for forbidden in ("discharge_summary", "needs_ocr", "completed"):
+        assert forbidden not in claims_text(body), forbidden
+    # `claims_text` lowercases, so this is the humanized label.
+    assert "category: lab report" in claims_text(body)
+
+
 def test_the_overview_claims_nothing_about_the_patient(client, patient):
     """The framing sentence describes the records, not the patient.
 

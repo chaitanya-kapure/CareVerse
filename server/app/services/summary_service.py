@@ -55,7 +55,7 @@ from app.models.collections import (
     get_patient_profiles,
     get_patient_summaries,
 )
-from app.models.medical_document import ExtractedData
+from app.models.medical_document import ExtractedData, format_category
 from app.models.patient_summary import (
     PatientSummaryDocument,
     SummaryProvider as SummaryProviderName,
@@ -526,7 +526,7 @@ def _record_line(document: SummaryDocument) -> str:
     """One line describing a document. Purely stored metadata."""
     return (
         f"\u201c{_clean(document.title) or 'Untitled document'}\u201d "
-        f"(category: {_clean(document.category) or 'other'}, "
+        f"(category: {format_category(_clean(document.category))}, "
         f"date: {document.document_date or _UNDATED})"
     )
 

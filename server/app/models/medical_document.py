@@ -26,6 +26,32 @@ DocumentCategory = Literal[
     "other",
 ]
 
+# Human labels for the stored category values.
+#
+# The category is what the patient picked at upload time, never something
+# derived from the file's contents, so this only reformats a word they already
+# chose. It exists here, beside the Literal, so the server never prints a raw
+# enum into a sentence a clinician reads; `client/src/utils/format.ts` carries
+# the same map for the screens.
+CATEGORY_LABELS: dict[str, str] = {
+    "lab_report": "Lab report",
+    "prescription": "Prescription",
+    "discharge_summary": "Discharge summary",
+    "imaging": "Imaging",
+    "other": "Document",
+}
+
+
+def format_category(value: Optional[str]) -> str:
+    """The stored category as a reader-facing word.
+
+    An unrecognized value is returned as it was stored rather than guessed at
+    or dropped, so an unexpected category shows up instead of disappearing.
+    """
+    if not value:
+        return CATEGORY_LABELS["other"]
+    return CATEGORY_LABELS.get(value, value)
+
 
 class ExtractedData(TypedDict, total=False):
     """Structured fields pulled from the document text.
