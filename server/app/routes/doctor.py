@@ -16,6 +16,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from app.controllers.doctor_controller import DoctorController
+from app.controllers.summary_controller import SummaryController
 from app.middlewares.auth_middleware import require_roles
 from app.models.user import UserDocument
 from app.schemas.access import (
@@ -24,6 +25,7 @@ from app.schemas.access import (
     DoctorPatientListResponse,
     DoctorPatientProfileResponse,
 )
+from app.schemas.summary import PatientSummaryResponse
 
 router = APIRouter(prefix="/doctor", tags=["doctor"])
 
@@ -79,3 +81,36 @@ async def get_patient_document_file(
     patient_id: str, document_id: str, user: DoctorUser
 ):
     return await DoctorController.get_document_file(patient_id, document_id, user)
+
+
+@router.get(
+    "/patients/{patient_id}/summary",
+    response_model=PatientSummaryResponse,
+    summary="The patient's summary, generated on demand",
+)
+async def get_patient_summary(patient_id: str, user: DoctorUser):
+    """Read-only, like every other route on this router.
+
+    Returns the persisted summary, generating one first if this patient has
+    none yet or if their readable record set has changed since it was written.
+    The patient id is authorized inside `SummaryController` before the service
+    is reached, so the 403 for an ungranted or nonexistent patient is the same
+    one the rest of this router already returns.
+    """
+    return await SummaryController.get_for_doctor(patient_id, user)
+
+
+@router.post(
+    "/patients/{patient_id}/summary/regenerate",
+    response_model=PatientSummaryResponse,
+    summary="Force the summary to be rebuilt from the current records",
+)
+async def regenerate_patient_summary(patient_id: str, user: DoctorUser):
+    """Rebuild now, ignoring the staleness check.
+
+    A POST and not a PUT: nothing about a summary is edited by hand, so there
+    is no update body and no delete. Every line in the result is copied from a
+    record the doctor can open, which means the only thing to do with a
+    summary that looks wrong is read the records again.
+    """
+    return await SummaryController.regenerate_for_doctor(patient_id, user)

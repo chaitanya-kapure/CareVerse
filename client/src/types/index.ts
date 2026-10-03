@@ -206,21 +206,36 @@ export interface DoctorPatientListResponse {
   total: number;
 }
 
-// --- Phase 4: AI summary (not implemented) ------------------------------
-// Declared ahead of the endpoints so the shape is settled. Nothing in the
-// app imports these yet, and no screen renders a summary.
+// --- Phase 4B: the patient summary ---------------------------------------
+// Matches the `patient_summaries` document one-for-one. `SummaryItem` is an
+// object and not a bare string on purpose: `source_document_id` is what makes
+// a claim checkable, and a type that allowed an unattributed string would let
+// one reach the screen.
+
+export interface SummaryItem {
+  text: string;
+  /** Id of the `medical_documents` row this line was copied from. */
+  source_document_id: string;
+  /** The document's own wording, when it fits. */
+  source_text?: string | null;
+}
 
 export interface SummarySection {
   key: string;
   title: string;
-  items: Array<string | Record<string, unknown>>;
+  items: SummaryItem[];
   empty_note?: string | null;
 }
 
 export interface PatientSummary {
   id: string;
   patient_id: string;
+  /** `mock | openai | anthropic | custom`. Only `mock` exists in Phase 4B. */
   provider: string;
+  /**
+   * Stored server-side, never inferred from the prose. Drives the demo label,
+   * so a deterministic summary can never be mistaken for a model's.
+   */
   is_mock: boolean;
   model: string | null;
   disclaimer: string;
@@ -228,6 +243,7 @@ export interface PatientSummary {
   sections: SummarySection[];
   source_document_ids: string[];
   source_document_count: number;
+  /** Documents that were present but could not be read (needs_ocr/failed). */
   unreadable_document_count: number;
   generated_at: string;
 }

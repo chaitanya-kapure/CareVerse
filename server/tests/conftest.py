@@ -34,6 +34,7 @@ from app.config import settings  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services import email_service  # noqa: E402
 from app.services import storage as storage_module  # noqa: E402
+from app.services import summary_service  # noqa: E402
 
 TEST_DB_NAME = "careverse_test"
 
@@ -68,6 +69,10 @@ def db():
     wipe()
     email_service.reset_email_provider()
     email_service.get_mock_outbox()  # drain anything left over
+    # Same reason as the email provider: a test that installs a failing or
+    # rogue summary provider would otherwise hand it to the next test through
+    # the process-wide override.
+    summary_service.reset_summary_provider()
 
     yield database
 

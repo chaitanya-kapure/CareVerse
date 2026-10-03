@@ -35,9 +35,26 @@ export const EXTRACTION_NOTICE =
 export const OCR_REQUIRED_NOTICE =
   "This PDF contains no readable text. It looks like a scanned or image-only document, so automated extraction was skipped.";
 
-/** Label for a deterministic, non-AI summary produced in development. */
+/**
+ * Label for a summary the deterministic provider produced.
+ *
+ * Shown whenever the server reports `is_mock: true`. Phase 4B has no language
+ * model at all, so this is not a degraded fallback that happens to be running
+ * locally -- it is the only provider that exists, and a reader must be able to
+ * tell that from a model's output at a glance rather than by inference.
+ */
 export const MOCK_SUMMARY_LABEL =
-  "Demo summary (deterministic fallback — no AI provider configured)";
+  "Demo summary — assembled deterministically from the records by pattern matching. No language model was used.";
+
+/**
+ * What every summary section says when it found nothing.
+ *
+ * Rendered in place of an empty list, never as a blank. A section with no
+ * items and no note is indistinguishable from a section the system decided not
+ * to show, which reads as "nothing abnormal here" — a clinical claim this
+ * system is not allowed to make on a patient's behalf.
+ */
+export const EMPTY_SECTION_NOTE = "Not found in the uploaded records.";
 
 export const EXTRACTION_STATUS_LABELS: Record<string, string> = {
   pending: "Queued",

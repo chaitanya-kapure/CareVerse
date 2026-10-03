@@ -1,7 +1,7 @@
 # CAREVERSE — Architecture & Design
 
-**Status:** Phase 1 complete (foundation + password recovery). Phase 2 complete (patient profile & document pipeline). Phases 3–4 not yet built.
-**Last updated:** Phase 2
+**Status:** Phase 1 complete (foundation + password recovery). Phase 2 complete (patient profile & document pipeline). Phase 3 complete (doctor access & authorized records). Phase 4A complete (deterministic structured extraction). Phase 4B complete (summary over a **mock** provider). **No real AI/LLM provider is implemented — that is Phase 4C.**
+**Last updated:** Phase 4B
 
 ---
 
@@ -134,7 +134,8 @@ careverse/
 │       │   ├── ExtractionBadge.tsx  # completed / needs_ocr / failed
 │       │   ├── ExtractionPanel.tsx  # ★ patient + doctor extracted text
 │       │   ├── DocumentFileActions.tsx # ★ view/save original PDF
-│       │   └── DetailRow.tsx     # label/value pair
+│       │   ├── DetailRow.tsx     # label/value pair
+│       │   ├── SummarySectionCard.tsx # ★ Phase 4B: one section + source links
 │       │   ├── SafetyNotice.tsx
 │       │   └── PhasePlaceholder.tsx
 │       ├── context/
@@ -152,14 +153,15 @@ careverse/
 │       │   │             UploadRecord · RecordDetails · DoctorAccessManager
 │       │   └── doctor/   Dashboard · AuthorizedPatients ·
 │       │                 PatientDetails · PatientRecords ·
-│       │                 PatientSummary (Phase 4 placeholder)
+│       │                 PatientSummary (★ Phase 4B, real)
 │       ├── services/
 │       │   ├── api.ts            # axios instance + error normalization
 │       │   ├── auth.service.ts
 │       │   ├── profile.service.ts   # GET/PATCH /patients/me
 │       │   ├── document.service.ts  # list / upload (FormData) / blob fetch
 │       │   ├── doctor.service.ts    # ★ authorized patients + their records
-│       │   └── access.service.ts    # ★ patient grants: list/grant/revoke
+│       │   ├── access.service.ts    # ★ patient grants: list/grant/revoke
+│       │   └── summary.service.ts   # ★ Phase 4B: read / regenerate / own
 │       ├── types/index.ts
 │       └── utils/
 │           ├── disclaimers.ts    # all medical-safety copy, one place
@@ -180,6 +182,7 @@ careverse/
 │   │   ├── document_controller.py
 │   │   ├── access_controller.py    # patient grants: list/grant/revoke
 │   │   ├── doctor_controller.py    # ★ reads, only after assert_patient_access
+│   │   ├── summary_controller.py   # ★ Phase 4B, thin: authorize → SummaryService
 │   ├── middlewares/
 │   │   ├── auth_middleware.py    # ★ security boundary
 │   │   └── error_handler.py
@@ -205,7 +208,8 @@ careverse/
 │   │   ├── common.py
 │   │   ├── profile.py
 │   │   ├── documents.py
-│   │   └── access.py         # grants + doctor reads (reuses Phase 2 shapes)
+│   │   ├── access.py         # grants + doctor reads (reuses Phase 2 shapes)
+│   │   └── summary.py        # ★ Phase 4B: the one summary response model
 │   ├── services/
 │   │   ├── auth_service.py
 │   │   ├── email_service.py  # provider seam: mock | smtp | gmail
@@ -217,7 +221,7 @@ careverse/
 │   │   ├── access_service.py      # ★ the only writer of patient_access
 │   │   ├── doctor_service.py      # ★ delegates to profile/document services
 │   │   ├── structured_extraction.py  # ★ Phase 4A: text → ExtractedData, pure
-│   │   └── summary_service.py     # Phase 4B — not yet created
+│   │   └── summary_service.py     # ★ Phase 4B: provider seam + MockSummaryProvider
 │   └── utils/
 │       ├── security.py       # bcrypt + JWT + OTP/reset-token hashing
 │       ├── errors.py         # error envelope helpers
@@ -229,15 +233,15 @@ careverse/
 │       ├── test_patient_profile.py
 │       ├── test_documents.py
 │       ├── test_doctor_access.py  # ★ the authorization matrix
-│       └── test_structured_extraction.py  # ★ Phase 4A, incl. the no-inference cases
+│       └── test_summary.py       # ★ Phase 4B: attribution, staleness, safety
     ├── scripts/                  # seed/demo data (Phase 5)
     └── storage/
         └── documents/            # uploaded PDFs (gitignored)
 ```
 
 **Not yet created** (arrive with their phase, rather than as empty stubs):
-`hooks/useDocuments.ts`, the structured information-extractor that will sit
-behind `extraction_service`, and `services/summary_service.py` (Phase 4).
+`hooks/useDocuments.ts` and the real AI/LLM summary provider (Phase 4C). Both
+summary seams they would sit behind now exist and are exercised by the mock.
 
 ---
 
@@ -364,7 +368,7 @@ the same doctor access a second time after a single revoke.
 {
   "_id": ObjectId,
   "patient_id": "<users._id>",     // UNIQUE — one live summary
-  "provider": "mock",              // mock|openai|anthropic|custom
+  "provider": "mock",              // mock today; openai|anthropic are Phase 4C
   "is_mock": true,                 // surfaced in the UI as a demo label
   "model": null,
   "disclaimer": "AI-generated summary of available records. Verify important
@@ -372,15 +376,21 @@ the same doctor access a second time after a single revoke.
   "overview": "…",
   "sections": [
     { "key": "lab_values", "title": "Important Lab Values",
-      "items": [ { "text": "…", "source_document_id": "…" } ],
+      "items": [ { "text": "Glucose: 126 mg/dL",
+                   "source_document_id": "…",   // REQUIRED, same patient
+                   "source_text": "Glucose 126 mg/dL Ref: 70-110 H" } ],
       "empty_note": "Not found in the uploaded records." }
   ],
   "source_document_ids": ["…"],
   "source_document_count": 4,
-  "unreadable_document_count": 1,
+  "unreadable_document_count": 1,   // needs_ocr + failed + over the doc cap
   "generated_at": ISODate
 }
 ```
+`items` are objects, never bare strings: each statement names the document it
+came from, and optionally quotes it verbatim. Written on demand — `GET`
+regenerates when the readable record set has changed (§9) — so there is no
+separate staleness field.
 ### `password_reset_otps`
 ```jsonc
 {
@@ -462,7 +472,7 @@ them, so there is no id in the request to change.
 | 🔒🛡 | GET | `/patients/me/documents/{documentId}` | patient | ✅ Phase 2 | Metadata + extracted data + text |
 | 🔒🛡 | DELETE | `/patients/me/documents/{documentId}` | patient | ✅ Phase 2 | Delete record + file |
 | 🔒🛡 | GET | `/patients/me/documents/{documentId}/file` | patient | ✅ Phase 2 | Stream the original PDF |
-| 🔒🛡 | GET | `/patients/me/summary` | patient | Phase 4 | Own generated summary |
+| 🔒🛡 | GET | `/patients/me/summary` | patient | ✅ Phase 4B | Own summary; generated on demand |
 | 🔒🛡 | GET | `/patients/me/access` | patient | ✅ Phase 3 | Every grant issued, revoked included |
 | 🔒🛡 | POST | `/patients/me/access` | patient | ✅ Phase 3 | Authorize one doctor (`doctor_id`, optional `note`) |
 | 🔒🛡 | DELETE | `/patients/me/access/{accessId}` | patient | ✅ Phase 3 | Revoke |
@@ -479,8 +489,22 @@ edit or delete route.
 | 🔒🛡 | GET | `/doctor/patients/{patientId}/documents` | doctor | ✅ Phase 3 | Record list, newest first |
 | 🔒🛡 | GET | `/doctor/patients/{patientId}/documents/{documentId}` | doctor | ✅ Phase 3 | One record, including extracted text |
 | 🔒🛡 | GET | `/doctor/patients/{patientId}/documents/{documentId}/file` | doctor | ✅ Phase 3 | Stream the original PDF |
-| 🔒🛡 | GET | `/doctor/patients/{patientId}/summary` | doctor | Phase 4 | The AI summary ★ |
-| 🔒🛡 | POST | `/doctor/patients/{patientId}/summary/regenerate` | doctor | Phase 4 | Force regeneration |
+| 🔒🛡 | GET | `/doctor/patients/{patientId}/summary` | doctor | ✅ Phase 4B | Summary, generated if missing or stale ★ |
+| 🔒🛡 | POST | `/doctor/patients/{patientId}/summary/regenerate` | doctor | ✅ Phase 4B | Discard the cached one and rebuild |
+
+There is deliberately no `PUT`, `PATCH` or `DELETE` for a summary. A summary is
+derived from records, not authored: it is generated, it can be thrown away, and
+the next read rebuilds it from the records that exist. A client cannot hand the
+server a summary — there is no write route through which invented clinical prose
+could enter the database.
+
+Both summary routes return the same `PatientSummaryResponse`. A regenerate is not
+a different kind of object, so it does not get its own response model and the two
+cannot drift apart. Authorization order is the same on both: token → role →
+resolve and validate the id → `assert_patient_access` (or `assert_own_records`)
+→ the service. The service receives an already-authorized `patient_id` and
+loads its own documents; it never takes a caller-supplied document id, so there
+is no path by which one patient's records could enter another patient's summary.
 
 The doctor's document responses are the **Phase 2 response models, unchanged**
 (`DocumentListResponse`, `MedicalDocumentDetailResponse`,
@@ -1103,64 +1127,162 @@ exactly the same reason and never reaches this pass.
 
 ## 9. Summary generation
 
+Phase 4A produces structured facts. Phase 4B turns them into a summary a
+doctor can read in one screen, with **every statement traceable to a document
+that really belongs to that patient**. No real AI/LLM provider is involved: the
+seam exists, and the only thing plugged into it is a deterministic provider
+that can only restate what Phase 4A extracted.
+
+### The flow
 ```
-SummaryService.regenerate(patient_id)
+GET  /doctor/patients/{id}/summary   (or POST …/regenerate, or /patients/me/summary)
 │
-  ├─ load documents for the patient
-  ├─ select those with extraction_status == "completed"
-│     (needs_ocr / failed are counted, never summarized)
-  ├─ build the provider input:
-│     { profile, documents: [{ id, title, document_date,
-│                              category, text, extracted_data }] }
-  ├─ provider = get_provider()          ← single switch point
-  ├─ result = provider.generate(input)
-  ├─ validate the shape (sections present, disclaimer intact)
-  └─ upsert patient_summaries (1 per patient)
+└─ SummaryService.get_summary(patient_id, force)      ← already authorized
+     │
+     ├─ ONE scoped query: documents for this patient, projection-limited
+     │    ├─ extraction_status == "completed"  → summarized
+     │    └─ needs_ocr / failed                → counted, never summarized
+     ├─ + profile: full_name, date_of_birth, gender  (and nothing else)
+     ├─ persisted = patient_summaries.find_one({patient_id})
+     ├─ if persisted and not force and not _is_stale(...)  → return it as-is
+     │
+     ├─ payload = SummaryPayload(profile, documents oldest-first, unreadable count)
+     ├─ draft   = provider.generate(payload)      ← the only switch point
+     ├─ validate: unknown section keys dropped, fixed order re-imposed,
+     │            every item's source_document_id checked against this
+     │            patient's own readable document ids — mismatches are
+     │            DROPPED, never re-attached to something plausible
+     ├─ disclaimer = AI_SUMMARY_DISCLAIMER        ← server-owned, see below
+     └─ upsert patient_summaries (unique uniq_patient_summary, 1 per patient)
 ```
 
-### Provider abstraction
+`SummaryService` receives **only an already-authorized `patient_id`**. It loads
+its own documents and never accepts a caller-supplied document id, so there is
+no route by which one patient's record can be summarized inside another
+patient's summary. Controllers stay thin: they authorize, call
+`asyncio.to_thread(SummaryService.get_summary, ...)` — the same off-loop
+pattern `DocumentService.upload` already uses — and return the result.
+
+### Provider seam
 ```python
 class SummaryProvider(Protocol):
-    name: str
-    def generate(self, payload: SummaryInput) -> SummaryResult: ...
+    name: SummaryProviderName     # "mock" | "openai" | "anthropic" | "custom"
+    is_mock: bool
+    model: Optional[str]
+
+    def generate(self, payload: SummaryPayload) -> SummaryDraft: ...
 ```
-`summary_service.get_provider()` returns:
-- `OpenAIProvider` / `AnthropicProvider` when `AI_API_KEY` is set
-- `MockProvider` otherwise — **deterministic**, so the demo works offline
 
-`is_mock` and `provider` are **stored on the summary document**, not inferred
-at read time, and the UI labels mock output explicitly. A demo can never
-mistake a fallback for a real model.
+This mirrors the email provider seam (`email_service.py`) deliberately, so
+Phase 4C is a config change and a new class rather than a redesign:
+`get_summary_provider()` resolves from `AI_PROVIDER`, `set_summary_provider()`
+injects a provider (tests use it), `reset_summary_provider()` clears the
+override. `SummaryService` holds an optional injected provider and otherwise
+resolves per call. **No controller imports a provider and no provider
+specificity leaks past `summary_service.py`.**
 
-### The mock summarizer
-Not random prose — it assembles the real `extracted_data` that the pipeline
-actually produced, sorted chronologically. It demonstrates the exact output
-shape and traceability that the real provider must match, so swapping in an
-API key changes only the prose, not the UI contract.
+Today `AI_PROVIDER` may only be `mock`. `AI_PROVIDER=openai` (or `anthropic`)
+raises `SummaryProviderUnavailable` — a loud 503, not a silent downgrade,
+exactly as `EMAIL_PROVIDER=gmail` behaves before Phase 1b shipped SMTP.
+`AI_API_KEY` is still read by nothing at runtime.
+
+`provider`, `is_mock` and `model` are **stored on the summary document** and
+never inferred from the output text. A provider that is not a mock says so
+itself; the UI renders `MOCK_SUMMARY_LABEL` whenever `is_mock` is true.
+
+### Provider input: deliberately small
+`SummaryPayload` carries the three approved profile fields and the readable
+records. `phone`, `address` and `notes` are **absent by construction** — the
+`SummaryProfile` dataclass has no such attributes, so a future edit cannot leak
+one into a provider call by forgetting a filter. Per document the provider
+receives `id`, `title`, `category`, `document_date`, `page_count`,
+`character_count` and `extracted_data`. It does **not** receive
+`storage_key`, `original_filename` / `stored_filename`, `extraction_error` or
+`extracted_text`: the raw text is large, and the structured fields were derived
+from it, so sending both would invite a provider to quote around the extraction
+instead of using it. `extracted_data` is consumed exactly as Phase 4A wrote it.
+
+### The mock provider
+Not random prose, and not a template with holes — it assembles the real
+`extracted_data` the pipeline produced:
+
+| Section | Source |
+|---|---|
+| `patient_overview` | detected date, referring doctor, facility, report title |
+| `medical_history` | `stated_conditions` (the document's own "Diagnosis:" line) |
+| `key_findings` | `abnormal_findings` |
+| `lab_values` | every `lab_values` entry, verbatim value + printed reference range |
+| `recent_records` | the 10 newest records, newest first |
+| `medications` | `medications` |
+| `abnormal_values` | only `lab_values` entries carrying a `flag` |
+| `chronological_overview` | every record, oldest first |
+
+Profile facts (name, date of birth, gender) live in the top-level `overview`
+string rather than as section items, so that **every item in the document has a
+document id attached to it**. It demonstrates the exact output shape and
+traceability a real provider must match, so swapping in an API key changes the
+prose and nothing else.
+
+The class contains no vocabulary of medical meaning — no condition words, no
+severity, no advice. A value becomes the string `"Glucose: 126 mg/dL"` and
+stops there. Whether that means anything is not a question this class is
+allowed to have an answer to.
 
 ### Fixed output sections
-`PATIENT OVERVIEW` · `AVAILABLE MEDICAL HISTORY` · `KEY FINDINGS FROM RECORDS` ·
-`IMPORTANT LAB VALUES` · `RECENT RECORDS` · `MEDICATIONS MENTIONED IN RECORDS` ·
-`ABNORMAL VALUES / FINDINGS MENTIONED IN RECORDS` · `CHRONOLOGICAL RECORD OVERVIEW`
+`Patient Overview` · `Available Medical History` · `Key Findings From Records` ·
+`Important Lab Values` · `Recent Records` · `Medications Mentioned In Records` ·
+`Abnormal Values / Findings Mentioned In Records` ·
+`Chronological Record Overview`
 
-Every section carries an `empty_note` of
-**"Not found in the uploaded records."** A missing section is always stated
-explicitly, never left blank — silence would read as "nothing wrong".
+All eight are always present, in that order. An empty section is **persisted**
+with `empty_note` of exactly **"Not found in the uploaded records."** Silence
+would read as "nothing wrong"; the section says what it does not know.
 
-### Prompt-level safety rules
-- Restate only; never infer, diagnose, or recommend.
-- Quote values; never round, correct, or reinterpret a lab number.
-- Attribute every statement to a document id; omit anything untraceable.
-- State "not found" rather than filling a gap with a plausible value.
-- On failure or timeout, fall back to `MockProvider` and set `is_mock`.
+### Bounds
+`MAX_DOCUMENTS = 200`, `MAX_ITEMS_PER_SECTION = 200`, `MAX_ITEM_CHARS = 600`,
+`MAX_OVERVIEW_CHARS = 600`, `MAX_SOURCE_TEXT_CHARS = 300`,
+`MAX_RECENT_DOCUMENTS = 10`. The document cap keeps the oldest records, not
+whichever rows MongoDB happened to return last. **Records dropped by the cap
+are counted into `unreadable_document_count`**, so the number the UI shows can
+never imply the summary read more than it actually did.
+
+### Staleness — three comparisons, no cache
+`GET` regenerates when the persisted summary no longer describes the records:
+1. the set of readable document ids differs (something uploaded or deleted);
+2. `unreadable_document_count` differs (a record became readable, or stopped
+   being one);
+3. the newest readable document's `uploaded_at` is later than `generated_at`.
+
+No new stored field and no cache layer are involved — the summary document is
+already the record of what it was built from. Documents are immutable after
+upload, so a later `uploaded_at` means a different set, never a re-save.
+
+Being wrong in one direction costs one cheap deterministic pass. Being wrong in
+the other costs a doctor reading a summary that has silently fallen behind the
+record list beside it. `POST …/regenerate` is `force=True` and skips all three.
 
 ### Medical-safety rules, enforced in code
-- The prompt instructs summarization only; there is no code path that can
-  emit a diagnosis, treatment, or drug recommendation.
-- `AI_SUMMARY_DISCLAIMER` is a single constant on the server **and** in
-  `client/src/utils/disclaimers.ts`, rendered on every summary view.
-- Original PDFs are always reachable from the summary via source links.
-- `patient_summaries.is_mock` forces a visible demo label.
+- **The disclaimer is server-owned.** `SummaryDraft` has no `disclaimer` field,
+  so there is nothing for a provider to fill in and nothing it can overwrite.
+  `AI_SUMMARY_DISCLAIMER` is written in `_to_document` and is the only source;
+  the client's copy in `client/src/utils/disclaimers.ts` is display-only.
+- **Attribution is mandatory by construction.** `SummaryItem.source_document_id`
+  has no default. Items whose id is not one of this patient's own readable
+  document ids are dropped before anything is written, and the drop is counted
+  in a log line with no content in it.
+- **Restate only.** There is no code path that can emit a diagnosis,
+  treatment, drug recommendation, interaction check, risk prediction or
+  preventive advice. `Glucose 126 mg/dL` may be stated; "diabetes" is not
+  derivable, because nothing in the path maps a number to a condition.
+- **A provider failure degrades honestly.** `_generate` catches everything,
+  logs the provider name and nothing else, and falls back to the deterministic
+  provider with `is_mock` set. No raw exception reaches the client, and the
+  fallback cannot fabricate a clinical fact because it only reads what Phase
+  4A extracted.
+- **The original is always one click away.** Every item links to
+  `/doctor/patients/{patientId}/records/{documentId}`.
+- **`is_mock` forces a visible label**, so mock output can never be mistaken
+  for clinical AI.
 
 ---
 
@@ -1181,11 +1303,11 @@ explicitly, never left blank — silence would read as "nothing wrong".
 | `STORAGE_LOCAL_PATH` | `storage` | Local upload directory |
 | `MAX_UPLOAD_MB` | `15` | Per-file upload cap |
 | `ALLOWED_MIME_TYPES` | `application/pdf` | Upload allowlist |
-| `AI_PROVIDER` | `mock` | Provider id |
-| `AI_API_KEY` | *(empty)* | Empty ⇒ mock summarizer |
-| `AI_MODEL` | `gpt-4o-mini` | Model id |
-| `AI_BASE_URL` | `https://api.openai.com/v1` | Provider base URL |
-| `AI_TIMEOUT_SECONDS` | `30` | Provider request timeout |
+| `AI_PROVIDER` | `mock` | Only `mock` in Phase 4B; anything else raises 503 `SummaryProviderUnavailable` |
+| `AI_API_KEY` | *(empty)* | **Read by nothing** — reserved for Phase 4C |
+| `AI_MODEL` | `gpt-4o-mini` | Phase 4C |
+| `AI_BASE_URL` | `https://api.openai.com/v1` | Phase 4C |
+| `AI_TIMEOUT_SECONDS` | `30` | Phase 4C |
 | `OTP_LENGTH` | `6` | Digits in the reset code (4–10) |
 | `OTP_TTL_MINUTES` | `10` | Code lifetime |
 | `OTP_MAX_ATTEMPTS` | `5` | Wrong guesses allowed per code |
@@ -1317,17 +1439,41 @@ diagnosis — **met and asserted**, along with the `needs_ocr` and `failed` path
 and the Phase 4A determinism and bounds properties.
 
 **Why this is not the summary.** Nothing in this phase generates prose. There is
-no `SummaryService`, no AI provider, and no LLM call. The frontend is
-untouched, `/doctor/patients/:patientId/summary` still renders a
-`PhasePlaceholder`, and `httpx` remains installed but unused for AI.
+no `SummaryService`, no AI provider, and no LLM call, and
+`/doctor/patients/:patientId/summary` renders a `PhasePlaceholder` that says
+so.
 
-### Phase 4B — AI summary
-Provider abstraction + mock summarizer + real provider ·
-`/patients/me/summary` and `/doctor/patients/{patientId}/summary` with the
-disclaimer · source-linked summary rendering over the `extracted_data` Phase 4A
-already produced. **Not started.** `/doctor/patients/:patientId/summary` renders
-a `PhasePlaceholder` that says so; nothing in the app imports the
-`PatientSummary` type.
+### Phase 4B — Summary generation (mock provider) ✅
+`SummaryService` + a provider seam + `MockSummaryProvider`, wired to the
+`extracted_data` Phase 4A already produced · one summary per patient in
+`patient_summaries` under the existing `uniq_patient_summary` index ·
+`GET /doctor/patients/{id}/summary` (generates when missing or stale),
+`POST /doctor/patients/{id}/summary/regenerate`, and `GET /patients/me/summary`
+— no `PUT`/`DELETE`, because a summary is derived, not authored · authorization
+unchanged: `assert_patient_access` for the doctor, `assert_own_records` for the
+patient, and the service receives only an authorized `patient_id` · items
+without a valid same-patient `source_document_id` are dropped before persisting
+· all eight §9 sections always present, empty ones saying exactly
+"Not found in the uploaded records." · disclaimer written by the server from a
+field the provider does not have · `is_mock` stored and labelled in the UI ·
+staleness from three comparisons, no cache · the doctor summary screen replaces
+its placeholder, rendering disclaimer → mock label → overview → sections →
+source links → generation metadata, with one new `SummarySectionCard` · 78 new
+tests.
+
+**Exit criteria:** a summary cannot state anything that is not in an uploaded
+record of that same patient, cannot be re-attributed after the fact, and is
+never presented as real clinical AI — **met and asserted**, including the
+no-inference cases carried forward from Phase 4A.
+
+**No real provider exists.** `AI_PROVIDER` accepts only `mock`; `openai` and
+`anthropic` raise `SummaryProviderUnavailable`. `AI_API_KEY` is read by nothing
+and no HTTP client is called on this path. Phase 4C adds the provider class; the
+seam, the controller, the persistence, the validation and the UI already exist
+and are exercised by the mock, so that phase changes the prose and nothing else.
+The patient-facing summary **endpoint** shipped and is tested, but no
+patient-facing summary **screen** was added — the doctor screen was the only
+screen in scope for this phase.
 
 ### Phase 5 — Demo hardening
 Seed script with synthetic demo patients, records and grants (clearly

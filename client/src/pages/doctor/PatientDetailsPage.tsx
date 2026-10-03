@@ -104,6 +104,11 @@ export default function PatientDetailsPage() {
             Back to authorized patients
           </Button>
         </Link>
+        <Link to={`/doctor/patients/${patientId}/summary`}>
+          <Button variant="secondary" size="sm">
+            View summary
+          </Button>
+        </Link>
       </div>
 
       <Alert tone="info" title="Records as uploaded" className="mb-4">

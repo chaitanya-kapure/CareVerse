@@ -51,9 +51,11 @@ class Settings(BaseSettings):
     allowed_mime_types: str = "application/pdf"
 
     # --- AI summarization (Phase 4B) ------------------------------------
-    # Declared but NOT yet read by any code: there is no AI provider and no
-    # summary endpoint. Phase 4A is fully deterministic and needs no key.
-    # Leave AI_API_KEY empty to run the deterministic mock summarizer.
+    # Only `ai_provider` is read today, and only to confirm it is "mock":
+    # Phase 4B ships the deterministic summary provider and nothing else, so
+    # naming openai/anthropic raises rather than pretending to call them. A
+    # real provider is Phase 4C, and `ai_api_key` is still unread by any code.
+    # Leave AI_API_KEY empty; leave AI_PROVIDER=mock.
     ai_provider: str = "mock"
     ai_api_key: str = ""
     ai_model: str = "gpt-4o-mini"
@@ -138,7 +140,13 @@ class Settings(BaseSettings):
 
     @property
     def ai_enabled(self) -> bool:
-        """An AI key is present -> use the real provider, else the mock."""
+        """An AI key is present.
+
+        Phase 4B does not use this: it ships only the deterministic provider,
+        and `ai_api_key` is read by nothing. It stays because Phase 4C will,
+        and adding it then would look like a new capability rather than the
+        wiring that always existed.
+        """
         return bool(self.ai_api_key.strip())
 
     @property

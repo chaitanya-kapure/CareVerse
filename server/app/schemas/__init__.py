@@ -31,6 +31,12 @@ from app.schemas.profile import (
     PatientProfileResponse,
     PatientProfileUpdate,
 )
+from app.schemas.summary import (
+    PatientSummaryResponse,
+    SummaryItemResponse,
+    SummarySectionResponse,
+    SummaryProviderLiteral,
+)
 
 __all__ = [
     "AccessGrantListResponse",
@@ -54,7 +60,11 @@ __all__ = [
     "PageMeta",
     "PatientProfileResponse",
     "PatientProfileUpdate",
+    "PatientSummaryResponse",
     "RegisterRequest",
+    "SummaryItemResponse",
+    "SummaryProviderLiteral",
+    "SummarySectionResponse",
     "TokenResponse",
     "UploadMeta",
     "UserResponse",
