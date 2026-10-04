@@ -1078,6 +1078,54 @@ def test_the_payload_never_contains_another_patients_records(
     assert payload.patient_id == patient["id"]
 
 
+def test_records_dropped_by_the_cap_are_counted_not_silently_dropped(
+    client, patient, monkeypatch
+):
+    """Exceeding the cap must be visible in the accounting.
+
+    `MAX_DOCUMENTS` bounds how many records one summary is built from, so a
+    patient with a very long history is summarized from a subset. Dropping the
+    overflow silently would be the worst outcome available: the screen would
+    say "12 records in this summary" while having read 200, and the doctor
+    would have no way to know a thirteenth record existed.
+
+    So the cap and the unreadable path share one number. A record dropped for
+    being too many is counted exactly as a record that could not be read --
+    neither produced a claim, and the doctor is told the total either way.
+    """
+    monkeypatch.setattr(summary_service, "MAX_DOCUMENTS", 2)
+    first = upload(client, patient, RICH_REPORT, filename="one.pdf")
+    second = upload(client, patient, RICH_REPORT, filename="two.pdf")
+    third = upload(client, patient, RICH_REPORT, filename="three.pdf")
+
+    body = own_summary(client, patient).json()
+
+    assert body["source_document_count"] == 2
+    assert body["unreadable_document_count"] == 1
+    assert set(body["source_document_ids"]) == {first, second}
+    assert third not in body["source_document_ids"]
+
+
+def test_the_cap_counts_overflow_without_inventing_a_scanned_record(client, patient, monkeypatch):
+    """The overflow count must not be confused with an extraction failure.
+
+    These two are different problems with the same honest answer. A record
+    over the cap was readable and simply not reached; a `needs_ocr` record was
+    never readable at all. Only the first is a gap in coverage the patient
+    could close by uploading a better PDF, so nothing in the summary may
+    suggest that -- the wording stays generic and no per-record reason is
+    invented for a document the provider never saw.
+    """
+    monkeypatch.setattr(summary_service, "MAX_DOCUMENTS", 1)
+    upload(client, patient, RICH_REPORT, filename="one.pdf")
+    upload(client, patient, RICH_REPORT, filename="two.pdf")
+
+    body = own_summary(client, patient).json()
+
+    assert body["unreadable_document_count"] == 1
+    assert "ocr" not in body["overview"].lower()
+
+
 # =====================================================================
 # J. unreadable documents
 # =====================================================================
