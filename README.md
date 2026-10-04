@@ -8,6 +8,11 @@ profile, extracts what it can from the PDFs they upload, and gives an
 authorized doctor a concise summary — with every claim linked back to the
 original document.
 
+The summary is assembled by a **deterministic mock provider**, not a language
+model. That is a deliberate Phase 4B choice: it keeps the demo reproducible
+and offline, and it means nothing here can invent a finding. A real provider
+is Phase 4C.
+
 > **CAREVERSE is not a diagnostic system.** It summarizes documents that
 > already exist. It does not diagnose conditions, recommend treatment, or
 > check for drug interactions. See
@@ -24,7 +29,7 @@ original document.
 | Database | MongoDB |
 | Auth | JWT (HS256) · bcrypt |
 | Uploads | python-multipart · pypdf |
-| AI | Provider-independent, with a deterministic mock fallback |
+| AI | Provider-independent seam; the only implemented provider is a deterministic mock. **No real LLM provider** |
 
 > The original spec asked for MERN (Node + Express). At your direction the
 > pre-existing **Python FastAPI** backend was kept instead, so the client is
@@ -150,26 +155,50 @@ running — the API still boots so the cause is visible instead of a crash loop.
 
 ## What works today
 
-**Phase 1 — foundation only.** Working end to end:
+Phases 1 through 4B. Working end to end:
 
-- API boots, connects to MongoDB, creates indexes on startup
-- `GET /health`, `POST /auth/register`, `POST /auth/login`,
-  `GET /auth/me`, `POST /auth/logout`
-- Registration auto-creates the patient's profile
-- JWT auth with bcrypt hashing, and the authorization primitives
-  (`assert_patient_access`) that every record route will use
-- Consistent `{ detail, code }` error envelope across all layers
-- Client: landing, login and register screens; role-guarded patient and
-  doctor route trees; shared UI kit; design tokens; safety notices
+- **Foundation** — API boots, connects to MongoDB, creates indexes on startup;
+  `GET /health` reports database and AI provider; JWT auth with bcrypt
+  hashing; consistent `{ detail, code }` error envelope across all layers
+- **Accounts** — register, login, `GET /auth/me`, logout, and password
+  recovery via a single-use OTP (`forgot-password` → `verify-reset-otp` →
+  `reset-password`). Registration auto-creates the patient's profile
+- **Patient profile** — view and edit, including the three fields a summary is
+  allowed to use (`full_name`, `date_of_birth`, `gender`)
+- **Document pipeline** — PDF upload → MIME and magic-byte validation → size
+  cap → storage → text extraction; own-records list, detail, delete, and
+  streaming of the original file. Upload succeeds even when extraction fails,
+  and says so in plain language rather than reporting the upload as broken
+- **Structured extraction (4A)** — deterministic, offline parsing of dates,
+  lab values, medications and stated conditions into a typed `extracted_data`
+  block. No model, no network, no API key
+- **Doctor access (3)** — a patient authorizes a named doctor, and revokes
+  them. Every doctor record route runs through `assert_patient_access`, so
+  "no such patient" and "not authorized" are the same `403`
+- **Summary (4B)** — a doctor's summary of one patient, and the patient's view
+  of their own. Eight fixed sections, every claim carrying the id of the
+  record it came from, and the provenance count stated on screen
+
+### About the summary
+
+**The summary provider is a deterministic mock. No real AI or LLM provider is
+implemented.** `MockSummaryProvider` assembles sections by pattern-matching the
+extracted data, so it is reproducible, offline, and free — and it is labelled
+as a mock in the response, in the UI, and in the API reference. It never
+infers, interprets or predicts; it copies what a record says, or states that
+the uploaded records do not say.
+
+Swapping in a real provider is Phase 4C, and is a configuration change plus one
+new class behind the `SummaryProvider` seam. Until then, `AI_PROVIDER=mock` is
+the only value that works; naming `openai` or `anthropic` fails loudly with
+`503 SUMMARY_PROVIDER_UNAVAILABLE` rather than quietly serving output no model
+produced.
 
 ## What comes next
 
-- **Phase 2** — patient profile editing, PDF upload → validation → storage →
-  text extraction → structured data, record list/detail/delete, original-file
-  streaming
-- **Phase 3** — patient-authorized doctor access, doctor screens, and the
-  AI summary with a provider abstraction plus a deterministic mock
-- **Phase 4** — seed data, state/accessibility pass, demo script
+- **Phase 4C** — a real AI/LLM provider behind the existing seam. Not
+  implemented, and not claimed anywhere in this repository
+- **Phase 5** — seed data, state/accessibility pass, demo script
 
 See [§10 of the architecture doc](docs/ARCHITECTURE.md#10-phased-implementation-plan).
 
