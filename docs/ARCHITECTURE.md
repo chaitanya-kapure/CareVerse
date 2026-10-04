@@ -552,6 +552,7 @@ exception types, and nothing drawn from the document's contents.
 | Could not write the file | 500 | `STORAGE_FAILED` |
 | Could not remove the file | 500 | `STORAGE_DELETE_FAILED` |
 | Database unreachable | 503 | `DATABASE_UNAVAILABLE` |
+| `AI_PROVIDER` names a provider this build does not implement | 503 | `SUMMARY_PROVIDER_UNAVAILABLE` |
 | Anything unexpected | 500 | `INTERNAL_ERROR` |
 
 **Extraction failure is not in this table, on purpose.** It is not an error

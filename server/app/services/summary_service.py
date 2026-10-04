@@ -47,6 +47,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Mapping, Optional, Protocol, Sequence
 
+from fastapi import HTTPException, status
 from pymongo.database import Database
 
 from app.config import AI_SUMMARY_DISCLAIMER, settings
@@ -99,13 +100,36 @@ MAX_SOURCE_TEXT_CHARS = 300
 MAX_RECENT_DOCUMENTS = 10
 
 
-class SummaryProviderUnavailable(RuntimeError):
+class SummaryProviderUnavailable(HTTPException):
     """A provider was requested that this build does not contain.
 
     Raised for `AI_PROVIDER=openai` / `anthropic` in Phase 4B. It carries no
     configuration value in its message, because an exception text is not a
     place to put a credential.
+
+    An `HTTPException`, like the 503 `get_db` raises, and not a bare
+    `RuntimeError`. That distinction is the whole point of the class: a plain
+    exception matches only the catch-all handler, so the client received
+    `500 INTERNAL_ERROR` -- reporting a configuration mistake as a server
+    crash, with a code that says retrying is worth trying. Subclassing
+    FastAPI's exception means the registered handler serialises it with the
+    `code` header intact, exactly as `DOCUMENT_NOT_FOUND` and
+    `DATABASE_UNAVAILABLE` are delivered, while `except
+    SummaryProviderUnavailable` still catches this one case and no other.
+
+    503 rather than 500 because the server is healthy and the records are
+    perfectly readable. What is missing is a summarizer, and it stays missing
+    until somebody configures one this build implements -- so retrying the
+    same request cannot help, which is the distinction `503` carries and
+    `500` does not.
     """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=detail,
+            headers={"code": "SUMMARY_PROVIDER_UNAVAILABLE"},
+        )
 
 
 # ======================================================================
@@ -464,9 +488,22 @@ def get_summary_provider() -> SummaryProvider:
     configured = (settings.ai_provider or "mock").strip().lower()
     provider = _IMPLEMENTED_PROVIDERS.get(configured)
     if provider is None:
+        # The rejected value is deliberately not echoed. This message is now
+        # rendered to the client, and `AI_PROVIDER` is a free-text variable
+        # that someone can paste anything into -- including a key pasted into
+        # the wrong name, which this response would then hand back. Naming the
+        # providers that *do* work is both safer and more useful than
+        # repeating back what was asked for. The offending value stays in the
+        # server log, where it belongs.
+        logger.error(
+            "AI_PROVIDER is set to an unimplemented value; refusing to guess. "
+            "Implemented providers: %s",
+            ", ".join(sorted(_IMPLEMENTED_PROVIDERS)),
+        )
         raise SummaryProviderUnavailable(
-            f"AI_PROVIDER={configured!r} is not implemented in Phase 4B. "
-            "Set AI_PROVIDER=mock for the deterministic summary."
+            "No summary provider is configured for this build. Implemented "
+            f"providers: {', '.join(sorted(_IMPLEMENTED_PROVIDERS))}. Set "
+            "AI_PROVIDER to one of those to generate a summary."
         )
     return provider
 

@@ -659,6 +659,99 @@ def test_an_unimplemented_provider_fails_loudly(monkeypatch, configured):
         summary_service.reset_summary_provider()
 
 
+def test_an_unimplemented_provider_is_a_503_over_http(client, patient, doctor, monkeypatch):
+    """The loud failure has to reach the client as a 503, not a 500.
+
+    `SummaryProviderUnavailable` is a `RuntimeError`, and the only handler that
+    catches a bare exception is the catch-all, which answers `500
+    INTERNAL_ERROR`. That is the wrong answer twice over: it reports a
+    misconfiguration as a server crash, and `INTERNAL_ERROR` tells the client
+    nothing about whether retrying could ever help.
+
+    503 is the honest code. The server is fine and the records are readable;
+    the thing that is missing is a summarizer, and it will stay missing until
+    somebody sets `AI_PROVIDER` to a value this build implements. Only the
+    doctor route is exercised because both routes share one controller path,
+    so a second copy of this test would test the same line twice.
+    """
+    grant_access(client, patient, doctor)
+    summary_service.reset_summary_provider()
+    monkeypatch.setattr(settings, "ai_provider", "openai")
+    try:
+        response = doctor_summary(client, doctor, patient["id"])
+    finally:
+        summary_service.reset_summary_provider()
+
+    assert response.status_code == 503, response.text
+    body = response.json()
+    assert body["code"] == "SUMMARY_PROVIDER_UNAVAILABLE"
+
+
+def test_an_unimplemented_provider_says_nothing_about_the_records(client, patient, doctor, monkeypatch):
+    """The 503 must not quote a record, and must not blame the server.
+
+    A provider failure is a configuration problem. The detail names the
+    setting and nothing else: no document text, no filename, no storage path,
+    no exception type, no traceback.
+    """
+    grant_access(client, patient, doctor)
+    upload(client, patient, text=RICH_REPORT)
+    summary_service.reset_summary_provider()
+    monkeypatch.setattr(settings, "ai_provider", "openai")
+    try:
+        response = doctor_summary(client, doctor, patient["id"])
+    finally:
+        summary_service.reset_summary_provider()
+
+    detail = response.json()["detail"]
+    lowered = detail.lower()
+    assert "glucose" not in lowered
+    assert "metformin" not in lowered
+    assert "report.pdf" not in lowered
+    assert "traceback" not in lowered
+    assert "summaryproviderunavailable" not in lowered
+
+
+def test_an_unimplemented_provider_writes_no_summary(client, patient, doctor, db, monkeypatch):
+    """A refused generation must not leave a partial or empty summary behind.
+
+    Otherwise the doctor's next click finds a stored document, decides it is
+    not stale, and serves the empty one as if it were current -- turning a loud
+    misconfiguration into a silently wrong screen.
+    """
+    grant_access(client, patient, doctor)
+    summary_service.reset_summary_provider()
+    monkeypatch.setattr(settings, "ai_provider", "openai")
+    try:
+        assert doctor_summary(client, doctor, patient["id"]).status_code == 503
+    finally:
+        summary_service.reset_summary_provider()
+
+    assert stored_summary(db, patient["id"]) is None
+
+
+def test_the_503_detail_does_not_echo_the_configured_value(monkeypatch):
+    """The refusal must not reflect the rejected value back to the client.
+
+    `AI_PROVIDER` is free text, and the most likely way to break this build is
+    to paste a key into the wrong variable. Now that the message is rendered
+    rather than swallowed by the catch-all handler, echoing the configured
+    value would return that key in the response body. The value belongs in the
+    server log; the response names the providers that do work instead.
+    """
+    summary_service.reset_summary_provider()
+    monkeypatch.setattr(settings, "ai_provider", "sk-live-looks-like-a-secret")
+    try:
+        with pytest.raises(SummaryProviderUnavailable) as caught:
+            get_summary_provider()
+    finally:
+        summary_service.reset_summary_provider()
+
+    detail = caught.value.detail.lower()
+    assert "sk-live" not in detail
+    assert "mock" in detail
+
+
 def test_the_provider_output_is_deterministic():
     """Same payload, same output. No clock, no randomness, no ordering luck."""
     document = summary_service.SummaryDocument(
