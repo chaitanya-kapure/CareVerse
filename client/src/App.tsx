@@ -16,6 +16,10 @@ import PatientProfilePage from "./pages/patient/PatientProfilePage";
 import MedicalRecordsPage from "./pages/patient/MedicalRecordsPage";
 import UploadRecordPage from "./pages/patient/UploadRecordPage";
 import RecordDetailsPage from "./pages/patient/RecordDetailsPage";
+// Named apart from the doctor's `PatientSummaryPage` below. The file name is
+// the same on purpose -- it is the same screen for a different reader -- but two
+// components with one identifier cannot both be imported into this table.
+import MySummaryPage from "./pages/patient/PatientSummaryPage";
 
 import DoctorDashboardPage from "./pages/doctor/DoctorDashboardPage";
 import AuthorizedPatientsPage from "./pages/doctor/AuthorizedPatientsPage";
@@ -59,6 +63,7 @@ export default function App() {
             <Route path="records" element={<MedicalRecordsPage />} />
             <Route path="records/upload" element={<UploadRecordPage />} />
             <Route path="records/:documentId" element={<RecordDetailsPage />} />
+            <Route path="summary" element={<MySummaryPage />} />
           </Route>
 
           {/* Doctor. `RequireAuth` is a UX guard only -- every screen below

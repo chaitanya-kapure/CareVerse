@@ -20,6 +20,10 @@ export const PATIENT_NAV: NavItem[] = [
   { label: "My Profile", to: "/patient/profile" },
   { label: "Medical Records", to: "/patient/records" },
   { label: "Upload Record", to: "/patient/records/upload" },
+  // Resolves without a patient id, unlike the doctor's summary screen, which
+  // hangs off `/doctor/patients/:patientId/...` and is reached from the patient
+  // list. This one needs no id at all: the server resolves it from the token.
+  { label: "My Summary", to: "/patient/summary" },
 ];
 
 // Only routes that resolve without knowing a patient id. The record and
