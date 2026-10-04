@@ -150,7 +150,8 @@ careverse/
 │       │   ├── LandingPage · LoginPage · RegisterPage · ForgotPasswordPage ·
 │       │   │   NotFoundPage
 │       │   ├── patient/  Dashboard · Profile · MedicalRecords ·
-│       │   │             UploadRecord · RecordDetails · DoctorAccessManager
+│       │   │             UploadRecord · RecordDetails · DoctorAccessManager ·
+│       │   │             PatientSummary (★ Phase 4B, own summary)
 │       │   └── doctor/   Dashboard · AuthorizedPatients ·
 │       │                 PatientDetails · PatientRecords ·
 │       │                 PatientSummary (★ Phase 4B, real)
@@ -1458,9 +1459,9 @@ without a valid same-patient `source_document_id` are dropped before persisting
 "Not found in the uploaded records." · disclaimer written by the server from a
 field the provider does not have · `is_mock` stored and labelled in the UI ·
 staleness from three comparisons, no cache · the doctor summary screen replaces
-its placeholder, rendering disclaimer → mock label → overview → sections →
-source links → generation metadata, with one new `SummarySectionCard` · 78 new
-tests.
+its placeholder and a patient-facing screen reuses the same components,
+both rendering disclaimer → mock label → overview → sections → source links →
+generation metadata, with one new `SummarySectionCard` · 86 new tests.
 
 **Exit criteria:** a summary cannot state anything that is not in an uploaded
 record of that same patient, cannot be re-attributed after the fact, and is
@@ -1468,13 +1469,21 @@ never presented as real clinical AI — **met and asserted**, including the
 no-inference cases carried forward from Phase 4A.
 
 **No real provider exists.** `AI_PROVIDER` accepts only `mock`; `openai` and
-`anthropic` raise `SummaryProviderUnavailable`. `AI_API_KEY` is read by nothing
-and no HTTP client is called on this path. Phase 4C adds the provider class; the
-seam, the controller, the persistence, the validation and the UI already exist
-and are exercised by the mock, so that phase changes the prose and nothing else.
-The patient-facing summary **endpoint** shipped and is tested, but no
-patient-facing summary **screen** was added — the doctor screen was the only
-screen in scope for this phase.
+`anthropic` fail the request with `503 SUMMARY_PROVIDER_UNAVAILABLE`. Naming an
+unimplemented provider is a refusal, not a degradation: a provider that silently
+did nothing would leave a document labelled as a model's output when no model
+produced it. `AI_API_KEY` is read by nothing and no HTTP client is called on this
+path. Phase 4C adds the provider class; the seam, the controller, the persistence,
+the validation and the UI already exist and are exercised by the mock, so that
+phase changes the prose and nothing else.
+
+**Both audiences read the same document.** One `patient_summaries` row serves the
+doctor screen and `/patients/me/summary`, so the two cannot drift — including the
+overview sentence, which therefore names the record set rather than addressing
+either reader. `"Assembled from 2 readable records in this record set"` is true
+for both; `"this patient has uploaded"` reads as a report about a third party on
+the patient's own screen, and `"you have uploaded"` tells a doctor they filed the
+PDF.
 
 ### Phase 5 — Demo hardening
 Seed script with synthetic demo patients, records and grants (clearly
