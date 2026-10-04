@@ -295,7 +295,7 @@ class MockSummaryProvider:
         readable = len(payload.documents)
         unreadable = payload.unreadable_document_count
 
-        who = payload.profile.full_name.strip() or "this patient"
+        who = payload.profile.full_name.strip() or "the patient"
         details = []
         if payload.profile.date_of_birth:
             details.append(f"date of birth {payload.profile.date_of_birth}")
@@ -315,8 +315,15 @@ class MockSummaryProvider:
                 " could not be read and is not included here."
             )
 
+        # Deliberately impersonal. One summary document is generated once and
+        # served unchanged to both audiences, so this sentence cannot address
+        # either of them -- "this patient has uploaded" reads as a report about
+        # a third party to the patient whose own records these are, and "you
+        # have uploaded" reads as though the doctor had done it. Naming the
+        # record set instead is correct for both, and the reader who owns it can
+        # tell from the name on the page whose it is.
         return (
-            f"Assembled from {counts} this patient has uploaded. "
+            f"Assembled from {counts} in this record set. "
             f"About {who} ({', '.join(details)}).{excluded} "
             "Every item below is copied from a record and links to the document "
             "it came from. Nothing here is a diagnosis or an interpretation."

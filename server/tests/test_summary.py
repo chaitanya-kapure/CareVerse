@@ -617,6 +617,25 @@ def test_a_patient_with_no_documents_at_all_says_so_everywhere(client, patient):
     assert "no readable records" in body["overview"]
 
 
+def test_the_overview_does_not_address_either_reader_in_the_second_person(client, patient, doctor):
+    """The same sentence is read by a patient and by their doctor.
+
+    One summary document is generated once and served unchanged to both, so the
+    overview cannot say "you". "This patient has uploaded" reads as a report
+    about a third party on the screen of the person whose records these are,
+    and "you have uploaded" tells a doctor they uploaded the file. Naming the
+    record set is the only phrasing that is true for both readers.
+    """
+    grant_access(client, patient, doctor)
+    upload(client, patient, RICH_REPORT)
+
+    for body in (own_summary(client, patient).json(), doctor_summary(client, doctor, patient["id"]).json()):
+        overview = body["overview"].lower()
+        assert "this patient has uploaded" not in overview
+        assert "you have uploaded" not in overview
+        assert "in this record set" in overview
+
+
 # =====================================================================
 # F. the mock provider
 # =====================================================================
