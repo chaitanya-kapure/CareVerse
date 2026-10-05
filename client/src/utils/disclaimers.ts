@@ -38,10 +38,16 @@ export const OCR_REQUIRED_NOTICE =
 /**
  * Label for a summary the deterministic provider produced.
  *
- * Shown whenever the server reports `is_mock: true`. Phase 4B has no language
- * model at all, so this is not a degraded fallback that happens to be running
- * locally -- it is the only provider that exists, and a reader must be able to
- * tell that from a model's output at a glance rather than by inference.
+ * Shown whenever the server reports `is_mock: true`. That flag is true in two
+ * situations: `AI_PROVIDER=mock`, the default, where this is the only provider
+ * that exists; and `AI_PROVIDER=openai` where the configured provider failed
+ * mid-request and the summary below this label is the deterministic fallback.
+ *
+ * Both are the same reader-facing truth -- no language model produced the text
+ * on this screen -- so both get this label. A reader must be able to tell that
+ * at a glance rather than by inference, and a fallback must never be presented
+ * as a model's output. When a real provider does produce the summary, `is_mock`
+ * is false and this label is not rendered at all.
  */
 export const MOCK_SUMMARY_LABEL =
   "Demo summary — assembled deterministically from the records by pattern matching. No language model was used.";

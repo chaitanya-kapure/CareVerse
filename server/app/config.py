@@ -17,6 +17,11 @@ AI_SUMMARY_DISCLAIMER = (
     "Verify important information with the original medical documents."
 )
 
+# Which `ai_provider` values need `ai_api_key` to be usable. Kept next to the
+# disclaimer rather than inside the class so `ai_enabled` reads as a fact about
+# the configuration instead of a second source of truth about providers.
+_AI_PROVIDERS_WITH_A_KEY = frozenset({"openai"})
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -50,16 +55,28 @@ class Settings(BaseSettings):
     max_upload_mb: int = 15
     allowed_mime_types: str = "application/pdf"
 
-    # --- AI summarization (Phase 4B) ------------------------------------
-    # Only `ai_provider` is read today, and only to confirm it is "mock":
-    # Phase 4B ships the deterministic summary provider and nothing else, so
-    # naming openai/anthropic raises rather than pretending to call them. A
-    # real provider is Phase 4C, and `ai_api_key` is still unread by any code.
-    # Leave AI_API_KEY empty; leave AI_PROVIDER=mock.
+    # --- AI summarization (Phase 4C) ------------------------------------
+    # `ai_provider` selects the implementation: "mock" (deterministic, the
+    # default and the fallback) or "openai" (any OpenAI-compatible
+    # chat-completions endpoint over plain httpx). "anthropic" is accepted by
+    # the shape of this field but not implemented, so naming it raises a 503
+    # rather than pretending to call it.
+    #
+    # `ai_api_key` is read only by the server. It is never returned in a
+    # response, never logged, and never reaches the client bundle. Leave it
+    # empty and leave the provider on "mock" to run without any third-party
+    # account; setting `ai_provider=openai` without a key is refused at the
+    # switch point rather than producing a 401 from the vendor.
     ai_provider: str = "mock"
+    # Never committed. Supply through the environment or a secrets manager.
     ai_api_key: str = ""
     ai_model: str = "gpt-4o-mini"
+    # Trailing "/v1"-style prefixes are accepted; "/chat/completions" is
+    # appended here. Point this at a self-hosted or proxied endpoint to keep
+    # medical text inside your own infrastructure.
     ai_base_url: str = "https://api.openai.com/v1"
+    # Finite by construction. An unbounded request is refused at the switch
+    # point, because a summary request carries a patient's extracted records.
     ai_timeout_seconds: int = 30
 
     # --- Password reset (OTP) --------------------------------------------
@@ -140,14 +157,17 @@ class Settings(BaseSettings):
 
     @property
     def ai_enabled(self) -> bool:
-        """An AI key is present.
+        """A real AI provider is both selected and credentialed.
 
-        Phase 4B does not use this: it ships only the deterministic provider,
-        and `ai_api_key` is read by nothing. It stays because Phase 4C will,
-        and adding it then would look like a new capability rather than the
-        wiring that always existed.
+        Both halves matter. `ai_provider=openai` with an empty key is not "AI
+        enabled" -- it is a deployment that will be refused with a 503, and
+        reporting it as enabled would make the failure look like a vendor
+        outage instead of a missing setting.
         """
-        return bool(self.ai_api_key.strip())
+        return (
+            (self.ai_provider or "").strip().lower() in _AI_PROVIDERS_WITH_A_KEY
+            and bool(self.ai_api_key.strip())
+        )
 
     @property
     def is_production(self) -> bool:
