@@ -2,6 +2,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { NAV_BY_ROLE } from "../utils/navigation";
 import Button from "../components/ui/Button";
+import ThemeToggle from "../components/ui/ThemeToggle";
 import SafetyNotice from "../components/SafetyNotice";
 import type { UserRole } from "../types";
 
@@ -49,9 +50,12 @@ function Topbar() {
           {user?.role} portal
         </p>
       </div>
-      <Button variant="secondary" size="sm" onClick={handleLogout}>
-        Sign out
-      </Button>
+      <div className="flex items-center gap-2">
+        <ThemeToggle />
+        <Button variant="secondary" size="sm" onClick={handleLogout}>
+          Sign out
+        </Button>
+      </div>
     </header>
   );
 }

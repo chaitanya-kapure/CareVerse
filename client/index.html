@@ -9,6 +9,23 @@
     />
     <meta name="theme-color" content="#0f766e" />
     <title>CAREVERSE — Centralized Patient Health Records</title>
+    <script>
+      // Apply the saved theme before first paint so a dark-mode user never
+      // sees a white flash. Kept inline and dependency-free; it mirrors the
+      // resolution logic in ThemeProvider.
+      (function () {
+        try {
+          var stored = localStorage.getItem("careverse_theme");
+          var dark =
+            stored === "dark" ||
+            (stored !== "light" &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (e) {
+          /* private mode: fall back to the light theme */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

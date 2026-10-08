@@ -1,6 +1,9 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
+  // Dark mode is driven by a `dark` class on <html>, set by ThemeProvider and
+  // by the inline script in index.html (which prevents a flash on first paint).
+  darkMode: "class",
   theme: {
     extend: {
       colors: {

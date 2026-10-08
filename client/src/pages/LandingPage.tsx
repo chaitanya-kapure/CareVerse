@@ -3,6 +3,7 @@ import { useAuth } from "../hooks/useAuth";
 import { dashboardPathFor } from "../utils/navigation";
 import Button from "../components/ui/Button";
 import Spinner from "../components/ui/Spinner";
+import ThemeToggle from "../components/ui/ThemeToggle";
 import { NOT_A_DIAGNOSIS_NOTICE } from "../utils/disclaimers";
 
 const STEPS = [
@@ -34,6 +35,7 @@ export default function LandingPage() {
             <span className="text-lg font-semibold tracking-tight text-slate-900">CAREVERSE</span>
           </div>
           <nav className="flex items-center gap-2">
+            <ThemeToggle />
             {status === "loading" ? (
               <Spinner label="" className="py-0" />
             ) : user ? (

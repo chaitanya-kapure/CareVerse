@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AuthProvider } from "./context/AuthProvider";
+import { ThemeProvider } from "./context/ThemeProvider";
 import RequireAuth from "./components/auth/RequireAuth";
 import AppShell from "./layouts/AppShell";
 import AuthLayout from "./layouts/AuthLayout";
@@ -36,62 +37,64 @@ import PatientSummaryPage from "./pages/doctor/PatientSummaryPage";
  */
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          {/* Public */}
-          <Route path="/" element={<LandingPage />} />
-          <Route element={<AuthLayout />}>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
-            {/* Recovery is reachable without a session: the point is that
-                the user cannot sign in. */}
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          </Route>
+    <ThemeProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            {/* Public */}
+            <Route path="/" element={<LandingPage />} />
+            <Route element={<AuthLayout />}>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/register" element={<RegisterPage />} />
+              {/* Recovery is reachable without a session: the point is that
+                  the user cannot sign in. */}
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            </Route>
 
-          {/* Patient */}
-          <Route
-            path="/patient"
-            element={
-              <RequireAuth allowedRole="patient">
-                <AppShell />
-              </RequireAuth>
-            }
-          >
-            <Route index element={<PatientDashboardPage />} />
-            <Route path="profile" element={<PatientProfilePage />} />
-            <Route path="records" element={<MedicalRecordsPage />} />
-            <Route path="records/upload" element={<UploadRecordPage />} />
-            <Route path="records/:documentId" element={<RecordDetailsPage />} />
-            <Route path="summary" element={<MySummaryPage />} />
-          </Route>
-
-          {/* Doctor. `RequireAuth` is a UX guard only -- every screen below
-              also calls a doctor-scoped endpoint that re-checks the role and
-              the patient grant on the server. */}
-          <Route
-            path="/doctor"
-            element={
-              <RequireAuth allowedRole="doctor">
-                <AppShell />
-              </RequireAuth>
-            }
-          >
-            <Route index element={<DoctorDashboardPage />} />
-            <Route path="patients" element={<AuthorizedPatientsPage />} />
-            <Route path="patients/:patientId" element={<PatientDetailsPage />} />
+            {/* Patient */}
             <Route
-              path="patients/:patientId/records/:documentId"
-              element={<PatientRecordsPage />}
-            />
-            <Route path="patients/:patientId/summary" element={<PatientSummaryPage />} />
-          </Route>
+              path="/patient"
+              element={
+                <RequireAuth allowedRole="patient">
+                  <AppShell />
+                </RequireAuth>
+              }
+            >
+              <Route index element={<PatientDashboardPage />} />
+              <Route path="profile" element={<PatientProfilePage />} />
+              <Route path="records" element={<MedicalRecordsPage />} />
+              <Route path="records/upload" element={<UploadRecordPage />} />
+              <Route path="records/:documentId" element={<RecordDetailsPage />} />
+              <Route path="summary" element={<MySummaryPage />} />
+            </Route>
 
-          {/* Root is role-dependent; send signed-in users to their own area. */}
-          <Route path="/dashboard" element={<Navigate to="/patient" replace />} />
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
-      </BrowserRouter>
-    </AuthProvider>
+            {/* Doctor. `RequireAuth` is a UX guard only -- every screen below
+                also calls a doctor-scoped endpoint that re-checks the role and
+                the patient grant on the server. */}
+            <Route
+              path="/doctor"
+              element={
+                <RequireAuth allowedRole="doctor">
+                  <AppShell />
+                </RequireAuth>
+              }
+            >
+              <Route index element={<DoctorDashboardPage />} />
+              <Route path="patients" element={<AuthorizedPatientsPage />} />
+              <Route path="patients/:patientId" element={<PatientDetailsPage />} />
+              <Route
+                path="patients/:patientId/records/:documentId"
+                element={<PatientRecordsPage />}
+              />
+              <Route path="patients/:patientId/summary" element={<PatientSummaryPage />} />
+            </Route>
+
+            {/* Root is role-dependent; send signed-in users to their own area. */}
+            <Route path="/dashboard" element={<Navigate to="/patient" replace />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

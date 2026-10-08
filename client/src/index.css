@@ -30,3 +30,195 @@
     }
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Dark theme
+   ---------------------------------------------------------------------------
+   Every surface, border and text colour in the app comes from a small, shared
+   set of utility classes. Rather than sprinkle `dark:` variants through every
+   component -- and inevitably miss one -- the dark palette is declared once,
+   here, and mapped onto those classes. The `dark` class is placed on <html>
+   by ThemeProvider, and by the inline boot script in index.html so there is
+   no flash of light UI before React mounts.
+
+   Selectors are two classes deep (`.dark .bg-white`), so they always beat the
+   single-class utility they override without needing `!important`.
+--------------------------------------------------------------------------- */
+
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+/* The body colour is set from @layer base, so it needs its own rule rather
+   than an override of `.bg-slate-50`. */
+.dark body {
+  @apply bg-slate-950 text-slate-100;
+}
+
+/* --- Surfaces --- */
+.dark .bg-white {
+  @apply bg-slate-900;
+}
+.dark .bg-slate-50 {
+  @apply bg-slate-950;
+}
+.dark .bg-slate-100 {
+  @apply bg-slate-800;
+}
+.dark .hover\:bg-slate-50:hover {
+  @apply bg-slate-800;
+}
+.dark .hover\:bg-slate-100:hover {
+  @apply bg-slate-800;
+}
+.dark .focus\:bg-white:focus {
+  @apply bg-slate-900;
+}
+.dark .disabled\:bg-slate-50:disabled {
+  @apply bg-slate-800;
+}
+
+/* --- Soft status surfaces --- */
+.dark .bg-teal-50 {
+  @apply bg-teal-950;
+}
+.dark .bg-red-50 {
+  @apply bg-red-950;
+}
+.dark .bg-amber-50 {
+  @apply bg-amber-950;
+}
+.dark .bg-emerald-50 {
+  @apply bg-emerald-950;
+}
+.dark .bg-sky-50 {
+  @apply bg-sky-950;
+}
+
+/* --- Borders and dividers --- */
+.dark .border-slate-200 {
+  @apply border-slate-800;
+}
+.dark .border-slate-300 {
+  @apply border-slate-700;
+}
+.dark .border-red-200 {
+  @apply border-red-900;
+}
+.dark .border-red-400 {
+  @apply border-red-500;
+}
+.dark .border-amber-200 {
+  @apply border-amber-900;
+}
+.dark .border-emerald-200 {
+  @apply border-emerald-900;
+}
+.dark .border-sky-200 {
+  @apply border-sky-900;
+}
+.dark .border-teal-600 {
+  @apply border-teal-500;
+}
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) {
+  @apply border-slate-800;
+}
+.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  @apply border-slate-800;
+}
+
+/* --- Text --- */
+.dark .text-slate-900 {
+  @apply text-slate-100;
+}
+.dark .text-slate-800 {
+  @apply text-slate-200;
+}
+.dark .text-slate-700 {
+  @apply text-slate-300;
+}
+.dark .text-slate-600 {
+  color: #94a3b8;
+}
+.dark .text-slate-500 {
+  color: #94a3b8;
+}
+.dark .text-slate-400 {
+  color: #64748b;
+}
+.dark .hover\:text-slate-900:hover {
+  @apply text-slate-100;
+}
+.dark .hover\:text-teal-900:hover {
+  @apply text-teal-200;
+}
+
+/* --- Accent text --- */
+.dark .text-teal-700 {
+  @apply text-teal-400;
+}
+.dark .text-teal-800 {
+  @apply text-teal-300;
+}
+.dark .text-teal-900 {
+  @apply text-teal-200;
+}
+.dark .text-red-600 {
+  @apply text-red-400;
+}
+.dark .text-red-800 {
+  @apply text-red-300;
+}
+.dark .text-red-900 {
+  @apply text-red-200;
+}
+.dark .text-amber-900 {
+  @apply text-amber-200;
+}
+.dark .text-emerald-800 {
+  @apply text-emerald-300;
+}
+.dark .text-emerald-900 {
+  @apply text-emerald-200;
+}
+.dark .text-sky-800 {
+  @apply text-sky-300;
+}
+.dark .text-sky-900 {
+  @apply text-sky-200;
+}
+
+/* --- Form affordances --- */
+.dark .placeholder\:text-slate-400::placeholder {
+  color: #64748b;
+}
+.dark .disabled\:text-slate-500:disabled {
+  color: #64748b;
+}
+.dark .focus\:border-teal-600:focus {
+  @apply border-teal-500;
+}
+.dark .focus\:ring-teal-600:focus {
+  @apply ring-teal-500;
+}
+.dark .ring-teal-600 {
+  @apply ring-teal-500;
+}
+.dark .focus-visible\:outline-teal-700:focus-visible {
+  @apply outline-teal-400;
+}
+.dark .focus-visible\:outline-red-600:focus-visible {
+  @apply outline-red-400;
+}
+.dark .focus-visible\:outline-slate-400:focus-visible {
+  @apply outline-slate-500;
+}
+
+/* --- Loader --- */
+.dark .border-t-teal-700 {
+  @apply border-t-teal-500;
+}
