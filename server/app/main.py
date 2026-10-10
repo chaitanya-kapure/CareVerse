@@ -17,6 +17,7 @@ from app.database import mongo  # noqa: E402
 from app.middlewares.error_handler import register_exception_handlers  # noqa: E402
 from app.models.indexes import ensure_indexes  # noqa: E402
 from app.routes import api_router  # noqa: E402
+from app.services import email_service  # noqa: E402
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -33,6 +34,16 @@ for noisy in ("pymongo", "pymongo.topology", "pymongo.connection", "pymongo.serv
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Own the Mongo connection for the lifetime of the process."""
+    # Bind the email provider named by EMAIL_PROVIDER. The service keeps a
+    # process-wide registry that defaults to the mock provider, so without
+    # this call a correctly configured EMAIL_PROVIDER=smtp would be ignored
+    # and resets would keep logging OTPs instead of sending them. Building it
+    # here also fails fast (and loudly) on a misconfigured SMTP provider.
+    email_service.reset_email_provider()
+    logger.info(
+        "Email provider: %s", email_service.get_email_provider().name
+    )
+
     db = mongo.connect()
     if db is not None:
         ensure_indexes(db)
