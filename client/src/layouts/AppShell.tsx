@@ -1,6 +1,8 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../hooks/useAuth";
 import { NAV_BY_ROLE } from "../utils/navigation";
+import { notificationService } from "../services/notification.service";
 import Button from "../components/ui/Button";
 import ThemeToggle from "../components/ui/ThemeToggle";
 import SafetyNotice from "../components/SafetyNotice";
@@ -15,8 +17,15 @@ function navLinkClasses({ isActive }: { isActive: boolean }): string {
   ].join(" ");
 }
 
-function Sidebar({ role }: { role: UserRole }) {
+function SidebarWithBadge({ role }: { role: UserRole }) {
   const items = NAV_BY_ROLE[role];
+  const { data } = useQuery({
+    queryKey: ["notif-unread-count"],
+    queryFn: notificationService.unreadCount,
+    refetchInterval: 30_000,
+  });
+  const unread = data?.count ?? 0;
+
   return (
     <nav aria-label="Main" className="flex-1 space-y-1 px-3">
       {items.map((item) => (
@@ -26,7 +35,14 @@ function Sidebar({ role }: { role: UserRole }) {
           end={item.end}
           className={navLinkClasses}
         >
-          {item.label}
+          <span className="flex items-center justify-between w-full">
+            {item.label}
+            {item.label === "Notifications" && unread > 0 && (
+              <span className="ml-auto flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-500 px-1 text-xs font-bold text-white">
+                {unread > 99 ? "99+" : unread}
+              </span>
+            )}
+          </span>
         </NavLink>
       ))}
     </nav>
@@ -88,7 +104,7 @@ export default function AppShell() {
             </div>
           </div>
           <div className="pb-4 md:flex md:flex-col md:pb-6">
-            <Sidebar role={role} />
+            <SidebarWithBadge role={role} />
           </div>
         </aside>
 

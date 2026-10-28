@@ -14,6 +14,8 @@ from pymongo.errors import DuplicateKeyError
 from app.models.collections import get_users
 from app.models.user import UserDocument, serialize_user
 from app.schemas.auth import RegisterRequest
+from app.services.careverse_id_service import CareVerseIdService
+from app.services.doctor_profile_service import DoctorProfileService
 from app.utils import errors
 from app.utils.security import hash_password, verify_password
 
@@ -53,6 +55,14 @@ class AuthService:
             raise errors.conflict("Email already registered", code="EMAIL_TAKEN")
 
         document["_id"] = result.inserted_id
+
+        user_id = str(result.inserted_id)
+        if payload.role == "patient":
+            self.ensure_patient_profile(user_id)
+            CareVerseIdService(self._db).get_or_create(user_id)
+        elif payload.role == "doctor":
+            DoctorProfileService(self._db).get_or_create(user_id, document["name"])
+
         return serialize_user(document)
 
     def authenticate(self, email: str, password: str) -> Optional[UserDocument]:

@@ -100,6 +100,10 @@ def server_error(detail: str, code: str = "INTERNAL_ERROR"):
     )
 
 
+def internal(detail: str = "Internal server error", code: str = "INTERNAL_ERROR"):
+    return server_error(detail=detail, code=code)
+
+
 def flatten_errors(raw_errors: list) -> str:
     """Collapse Pydantic's error list into one sentence the UI can show.
 

@@ -1,14 +1,4 @@
-"""MongoDB collection names and accessors.
-
-CAREVERSE uses five clinical collections (spec section 12) plus
-`password_reset_otps`. Anything beyond these belongs inside a document, not
-a new collection.
-
-`password_reset_otps` is the one addition to the spec's set. It is not
-clinical data -- it holds a short-lived, single-use reset credential with a
-TTL index -- and keeping it out of `users` is what allows expired records
-to be reclaimed by the database instead of accumulating on the account.
-"""
+"""MongoDB collection names and accessors."""
 
 from pymongo.database import Database
 
@@ -18,6 +8,15 @@ MEDICAL_DOCUMENTS = "medical_documents"
 PATIENT_ACCESS = "patient_access"
 PATIENT_SUMMARIES = "patient_summaries"
 PASSWORD_RESET_OTPS = "password_reset_otps"
+DOCTOR_PROFILES = "doctor_profiles"
+CAREVERSE_IDS = "careverse_ids"
+POSTS = "posts"
+COMMENTS = "comments"
+FOLLOWS = "follows"
+CONVERSATIONS = "conversations"
+MESSAGES = "messages"
+NOTIFICATIONS = "notifications"
+ACCESS_REQUESTS = "access_requests"
 
 ALL_COLLECTIONS = (
     USERS,
@@ -26,6 +25,15 @@ ALL_COLLECTIONS = (
     PATIENT_ACCESS,
     PATIENT_SUMMARIES,
     PASSWORD_RESET_OTPS,
+    DOCTOR_PROFILES,
+    CAREVERSE_IDS,
+    POSTS,
+    COMMENTS,
+    FOLLOWS,
+    CONVERSATIONS,
+    MESSAGES,
+    NOTIFICATIONS,
+    ACCESS_REQUESTS,
 )
 
 
@@ -51,3 +59,39 @@ def get_patient_summaries(db: Database):
 
 def get_password_reset_otps(db: Database):
     return db[PASSWORD_RESET_OTPS]
+
+
+def get_doctor_profiles(db: Database):
+    return db[DOCTOR_PROFILES]
+
+
+def get_careverse_ids(db: Database):
+    return db[CAREVERSE_IDS]
+
+
+def get_posts(db: Database):
+    return db[POSTS]
+
+
+def get_comments(db: Database):
+    return db[COMMENTS]
+
+
+def get_follows(db: Database):
+    return db[FOLLOWS]
+
+
+def get_conversations(db: Database):
+    return db[CONVERSATIONS]
+
+
+def get_messages(db: Database):
+    return db[MESSAGES]
+
+
+def get_notifications(db: Database):
+    return db[NOTIFICATIONS]
+
+
+def get_access_requests(db: Database):
+    return db[ACCESS_REQUESTS]

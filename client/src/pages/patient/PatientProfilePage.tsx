@@ -9,6 +9,7 @@ import Spinner from "../../components/ui/Spinner";
 import { Select, Textarea, TextInput } from "../../components/ui/Field";
 import DoctorAccessManager from "./DoctorAccessManager";
 import { profileService } from "../../services/profile.service";
+import { doctorProfileService } from "../../services/doctor-profile.service";
 import { getErrorMessage } from "../../services/api";
 import type { PatientProfile, PatientProfileUpdate } from "../../types";
 
@@ -31,6 +32,59 @@ function toForm(profile: PatientProfile): FormState {
     address: profile.address ?? "",
     notes: profile.notes ?? "",
   };
+}
+
+function CareVerseIdCard() {
+  const [copied, setCopied] = useState(false);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["my-careverse-id"],
+    queryFn: doctorProfileService.getMyCareverseId,
+  });
+
+  const careVerseId = data?.careverse_id;
+
+  const handleCopy = () => {
+    if (careVerseId) {
+      navigator.clipboard.writeText(careVerseId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <Card
+      title="Your CareVerse ID"
+      description="A unique 4-digit identification code for rapid clinician lookups."
+      className="mt-6"
+    >
+      {isLoading ? (
+        <Spinner label="Loading CareVerse ID" />
+      ) : error ? (
+        <Alert tone="warning">Could not load your CareVerse ID at this time.</Alert>
+      ) : careVerseId ? (
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="rounded-lg border-2 border-teal-600 bg-teal-50 px-5 py-2.5 text-center">
+              <span className="font-mono text-3xl font-extrabold tracking-widest text-teal-800">
+                {careVerseId}
+              </span>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-slate-900">Personal CareVerse ID</p>
+              <p className="text-xs text-slate-500">
+                Share this ID with your doctor so they can request access to your records.
+              </p>
+            </div>
+          </div>
+          <Button variant="secondary" size="sm" onClick={handleCopy}>
+            {copied ? "Copied!" : "Copy ID"}
+          </Button>
+        </div>
+      ) : (
+        <p className="text-sm text-slate-500">No CareVerse ID assigned yet.</p>
+      )}
+    </Card>
+  );
 }
 
 /**
@@ -195,6 +249,8 @@ export default function PatientProfilePage() {
           </div>
         </Card>
       </form>
+
+      <CareVerseIdCard />
 
       <DoctorAccessManager />
     </>

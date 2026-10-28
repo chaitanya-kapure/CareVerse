@@ -20,19 +20,22 @@ export const PATIENT_NAV: NavItem[] = [
   { label: "My Profile", to: "/patient/profile" },
   { label: "Medical Records", to: "/patient/records" },
   { label: "Upload Record", to: "/patient/records/upload" },
-  // Resolves without a patient id, unlike the doctor's summary screen, which
-  // hangs off `/doctor/patients/:patientId/...` and is reached from the patient
-  // list. This one needs no id at all: the server resolves it from the token.
   { label: "My Summary", to: "/patient/summary" },
+  { label: "Social Feed", to: "/patient/feed" },
+  { label: "Discover Doctors", to: "/patient/discover" },
+  { label: "Access Requests", to: "/patient/access-requests" },
+  { label: "Messages", to: "/patient/messages" },
+  { label: "Notifications", to: "/patient/notifications" },
 ];
 
-// Only routes that resolve without knowing a patient id. The record and
-// summary screens hang off `/doctor/patients/:patientId/...`, so they are
-// reached from the patient list rather than from the sidebar -- a link to
-// `/doctor/patients/records` would have no patient to attach.
 export const DOCTOR_NAV: NavItem[] = [
   { label: "Dashboard", to: "/doctor", end: true },
+  { label: "My Profile", to: "/doctor/profile" },
   { label: "Authorized Patients", to: "/doctor/patients" },
+  { label: "Find Patient", to: "/doctor/find-patient" },
+  { label: "Social Feed", to: "/doctor/feed" },
+  { label: "Messages", to: "/doctor/messages" },
+  { label: "Notifications", to: "/doctor/notifications" },
 ];
 
 export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {

@@ -247,3 +247,168 @@ export interface PatientSummary {
   unreadable_document_count: number;
   generated_at: string;
 }
+
+// --- Social / Doctor Profile / Messaging / Notifications ---
+
+export interface DoctorProfile {
+  id: string;
+  user_id: string;
+  name: string;
+  specialty: string;
+  qualifications: string;
+  experience_years: number | null;
+  bio: string;
+  location: string | null;
+  verification_status: "unverified" | "pending" | "verified" | "rejected";
+  profile_image_url: string | null;
+  follower_count: number;
+  post_count: number;
+  is_following?: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DoctorProfileUpdate {
+  specialty?: string;
+  qualifications?: string;
+  experience_years?: number | null;
+  bio?: string;
+  location?: string | null;
+}
+
+export interface DoctorDiscoveryResponse {
+  items: DoctorProfile[];
+  total: number;
+}
+
+export type PostType = "text" | "article" | "question" | "awareness";
+
+export interface Post {
+  id: string;
+  author_id: string;
+  author_role: string;
+  author_name: string;
+  content: string;
+  post_type: PostType;
+  hashtags: string[];
+  image_url: string | null;
+  like_count: number;
+  comment_count: number;
+  save_count: number;
+  viewer_has_liked: boolean;
+  viewer_has_saved: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PostListResponse {
+  items: Post[];
+  total: number;
+}
+
+export interface CreatePostPayload {
+  content: string;
+  post_type?: PostType;
+  hashtags?: string[];
+}
+
+export interface Comment {
+  id: string;
+  post_id: string;
+  author_id: string;
+  author_name: string;
+  content: string;
+  created_at: string;
+}
+
+export interface CommentListResponse {
+  items: Comment[];
+  total: number;
+}
+
+export interface Conversation {
+  id: string;
+  participant_ids: string[];
+  other_participant_name: string;
+  last_message_at: string | null;
+  last_message_preview: string | null;
+  unread_count: number;
+  created_at: string;
+}
+
+export interface ConversationListResponse {
+  items: Conversation[];
+  total: number;
+}
+
+export interface Message {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  sender_name: string;
+  content: string;
+  read_by: string[];
+  created_at: string;
+}
+
+export interface MessageListResponse {
+  items: Message[];
+  total: number;
+}
+
+export interface Notification {
+  id: string;
+  user_id: string;
+  type: string;
+  title: string;
+  body: string;
+  payload: Record<string, unknown>;
+  is_read: boolean;
+  created_at: string;
+}
+
+export interface NotificationListResponse {
+  items: Notification[];
+  total: number;
+}
+
+export type AccessRequestStatus = "pending" | "approved" | "rejected" | "revoked" | "expired";
+
+export interface AccessRequest {
+  id: string;
+  doctor_id: string;
+  doctor_name: string;
+  patient_careverse_id: string;
+  patient_id: string;
+  purpose: string;
+  requested_categories: string[];
+  requested_duration_days: number;
+  status: AccessRequestStatus;
+  rejection_reason: string | null;
+  grant_id: string | null;
+  created_at: string;
+  responded_at: string | null;
+}
+
+export interface AccessRequestListResponse {
+  items: AccessRequest[];
+  total: number;
+}
+
+export interface CreateAccessRequestPayload {
+  patient_careverse_id: string;
+  purpose: string;
+  requested_categories: string[];
+  requested_duration_days: number;
+}
+
+export interface PatientDiscoveryResult {
+  patient_id: string;
+  careverse_id: string;
+  full_name: string;
+}
+
+export interface CareVerseIdResponse {
+  careverse_id: string;
+}
+

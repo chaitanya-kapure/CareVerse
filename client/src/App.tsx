@@ -28,6 +28,14 @@ import PatientDetailsPage from "./pages/doctor/PatientDetailsPage";
 import PatientRecordsPage from "./pages/doctor/PatientRecordsPage";
 import PatientSummaryPage from "./pages/doctor/PatientSummaryPage";
 
+import FeedPage from "./pages/FeedPage";
+import DiscoverDoctorsPage from "./pages/patient/DiscoverDoctorsPage";
+import AccessRequestsPage from "./pages/patient/AccessRequestsPage";
+import MessagingPage from "./pages/MessagingPage";
+import NotificationsPage from "./pages/NotificationsPage";
+import DoctorProfileSetupPage from "./pages/doctor/DoctorProfileSetupPage";
+import FindPatientPage from "./pages/doctor/FindPatientPage";
+
 /**
  * Route table.
  *
@@ -66,6 +74,11 @@ export default function App() {
               <Route path="records/upload" element={<UploadRecordPage />} />
               <Route path="records/:documentId" element={<RecordDetailsPage />} />
               <Route path="summary" element={<MySummaryPage />} />
+              <Route path="feed" element={<FeedPage />} />
+              <Route path="discover" element={<DiscoverDoctorsPage />} />
+              <Route path="access-requests" element={<AccessRequestsPage />} />
+              <Route path="messages" element={<MessagingPage />} />
+              <Route path="notifications" element={<NotificationsPage />} />
             </Route>
 
             {/* Doctor. `RequireAuth` is a UX guard only -- every screen below
@@ -87,6 +100,11 @@ export default function App() {
                 element={<PatientRecordsPage />}
               />
               <Route path="patients/:patientId/summary" element={<PatientSummaryPage />} />
+              <Route path="profile" element={<DoctorProfileSetupPage />} />
+              <Route path="find-patient" element={<FindPatientPage />} />
+              <Route path="feed" element={<FeedPage />} />
+              <Route path="messages" element={<MessagingPage />} />
+              <Route path="notifications" element={<NotificationsPage />} />
             </Route>
 
             {/* Root is role-dependent; send signed-in users to their own area. */}
