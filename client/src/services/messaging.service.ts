@@ -7,7 +7,7 @@ export const messagingService = {
     return res.data;
   },
   startConversation: async (otherUserId: string): Promise<Conversation> => {
-    const res = await api.post("/conversations", { other_user_id: otherUserId });
+    const res = await api.post("/conversations", { recipient_id: otherUserId });
     return res.data;
   },
   listMessages: async (conversationId: string, skip = 0, limit = 50): Promise<MessageListResponse> => {
@@ -19,6 +19,6 @@ export const messagingService = {
     return res.data;
   },
   markRead: async (conversationId: string): Promise<void> => {
-    await api.patch(`/conversations/${conversationId}/read`);
+    await api.post(`/conversations/${conversationId}/read`);
   },
 };

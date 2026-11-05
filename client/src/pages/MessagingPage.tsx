@@ -121,19 +121,21 @@ export default function MessagingPage() {
           <form onSubmit={handleStartChat} className="space-y-3">
             <div>
               <label htmlFor="user-id-input" className="block text-xs font-medium text-slate-700 mb-1">
-                Recipient User ID
+                {user?.role === "doctor" ? "Patient CareVerse ID" : "Clinician User ID"}
               </label>
               <input
                 id="user-id-input"
                 type="text"
                 value={newChatUserId}
                 onChange={(e) => setNewChatUserId(e.target.value)}
-                placeholder="Paste the user ID of your doctor or patient"
+                placeholder={user?.role === "doctor" ? "Enter the patient's 4-digit CareVerse ID" : "Enter the clinician's user ID"}
                 className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-teal-600 focus:outline-none focus:ring-1 focus:ring-teal-600"
                 required
               />
               <p className="mt-1 text-xs text-slate-500">
-                You can start conversations with authorized contacts or discover clinicians in the directory.
+                {user?.role === "doctor"
+                  ? "You can message a patient after they have granted you record access."
+                  : "You can message clinicians who have active access to your records. Find their user ID in the clinician directory."}
               </p>
             </div>
 

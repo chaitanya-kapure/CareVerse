@@ -31,10 +31,10 @@ export const doctorProfileService = {
     return res.data;
   },
   follow: async (userId: string): Promise<void> => {
-    await api.post(`/social/follows/${userId}`);
+    await api.post(`/social/follow/${userId}`);
   },
   unfollow: async (userId: string): Promise<void> => {
-    await api.delete(`/social/follows/${userId}`);
+    await api.post(`/social/unfollow/${userId}`);
   },
   lookupPatientByCareverseId: async (careVerseId: string): Promise<PatientDiscoveryResult> => {
     const res = await api.get(`/discovery/patient/${careVerseId}`);
