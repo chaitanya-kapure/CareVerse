@@ -14,7 +14,7 @@ AI_SUMMARY_DISCLAIMER = (
 )
 
 # Which `ai_provider` values need `ai_api_key` to be usable. Kept next to the
-_AI_PROVIDERS_WITH_A_KEY = frozenset({"openai"})
+_AI_PROVIDERS_WITH_A_KEY = frozenset({"openai", "gemini"})
 
 
 class Settings(BaseSettings):
@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     allowed_mime_types: str = "application/pdf,image/jpeg,image/png,image/webp"
 
     # --- AI summarization (Phase 4C) ------------------------------------
+    gemini_api_key: str = ""
     ai_provider: str = "mock"
     # Never committed. Supply through the environment or a secrets manager.
     ai_api_key: str = ""
