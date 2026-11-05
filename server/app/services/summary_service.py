@@ -1,65 +1,4 @@
-"""Patient summary generation, behind a provider seam.
-
-Phase 4B built the seam, the service, the persistence, the validation and the UI
-around a deterministic provider. **Phase 4C plugs one real provider into that
-seam** -- `OpenAICompatibleSummaryProvider`, an HTTP client for any
-OpenAI-compatible chat-completions endpoint -- and changes nothing else. No
-route, controller, schema, stored document shape or React component learned that
-a model exists.
-
-Two providers are selectable through `AI_PROVIDER`:
-
-    mock     `MockSummaryProvider`. Assembles the `extracted_data` Phase 4A
-             produced, with no model in the loop. Also the fallback whenever a
-             real provider fails at runtime.
-    openai   `OpenAICompatibleSummaryProvider`. One HTTP request per summary,
-             JSON in, JSON out, and nothing is trusted until it has been
-             validated here.
-
-`anthropic` is still refused with `SummaryProviderUnavailable`. Naming a
-provider this build does not contain is a refusal, not a degradation: a
-provider that silently did nothing would leave a document labelled as a model's
-output when no model produced it.
-
-Design notes that matter
-------------------------
-**The provider receives an already-authorized `patient_id` and nothing else.**
-It never sees a doctor id, a token, a request, or a patient object handed in
-by the frontend. `SummaryService` loads the data itself, from ids it derived,
-after the route dependency has proved the caller may read this patient.
-
-**The payload is deliberately thin.** Three profile fields (`full_name`,
-`date_of_birth`, `gender`) and per-document metadata plus `extracted_data`.
-`phone`, `address` and the patient's free-text `notes` are not sent, because
-nothing in a summary needs them and a real provider would be handing them to a
-third party. `storage_key`, `original_filename` and `extraction_error` are not
-sent either: they are internal plumbing, and the original file is reachable
-through the source links instead.
-
-**Traceability is enforced here, not by the provider.** Every item carries a
-`source_document_id`. Before anything is persisted, each id is checked against
-the set of documents that actually belong to this patient; an item whose id is
-missing, malformed, or points at somebody else's record is dropped. A summary
-that cannot name where a claim came from is not persisted at all.
-
-**The disclaimer is not the provider's to set.** `AI_SUMMARY_DISCLAIMER` is
-written over whatever came back, so no provider -- present or future -- can
-reword or drop it.
-
-**The output shape is fixed.** The eight sections in `SUMMARY_SECTIONS` are
-rendered in that order whether or not the provider returned them, and an empty
-one still says "Not found in the uploaded records." A blank section would read
-as "nothing abnormal here", which is a claim this system is not allowed to
-make on a patient's behalf.
-
-**What the server can and cannot police.** Structure, bounds, attribution,
-counts, disclaimer and labelling are all checked in code. Whether a model
-*chose* to interpret rather than restate cannot be proved here, because proving
-it would mean carrying a blocklist of medical vocabulary -- which would mangle
-legitimate record text and be evaded immediately anyway. That gap is what
-`AI_SUMMARY_SYSTEM_PROMPT` and the disclaimer exist to close, and it is why the
-mock provider stays the default: it has no freedom to misuse.
-"""
+"""Patient summary generation, behind a provider seam."""
 
 from __future__ import annotations
 
@@ -95,8 +34,6 @@ logger = logging.getLogger(__name__)
 # ======================================================================
 
 # The section list is fixed by docs/ARCHITECTURE.md section 9. It is emitted
-# in exactly this order, every time, and every one of them is always present
-# -- including the empty ones, which carry `EMPTY_SECTION_NOTE`.
 SUMMARY_SECTIONS: tuple[tuple[str, str], ...] = (
     ("patient_overview", "Patient Overview"),
     ("medical_history", "Available Medical History"),
@@ -112,8 +49,6 @@ SUMMARY_SECTIONS: tuple[tuple[str, str], ...] = (
 EMPTY_SECTION_NOTE = "Not found in the uploaded records."
 
 # Bounds. The provider is given a small, fixed amount of data and is not
-# allowed to return an unbounded document; nothing here can grow with the
-# number of pages a patient happens to have uploaded.
 MAX_DOCUMENTS = 200
 MAX_ITEMS_PER_SECTION = 200
 MAX_ITEM_CHARS = 600
@@ -124,30 +59,7 @@ MAX_RECENT_DOCUMENTS = 10
 
 
 class SummaryProviderUnavailable(HTTPException):
-    """This build cannot serve the summary provider that was asked for.
-
-    Raised for `AI_PROVIDER=anthropic` -- a provider that does not exist here --
-    and for any other unrecognized value. It carries no configuration value in
-    its message, because an exception text is not a place to put a credential:
-    `AI_PROVIDER` is free text, and the most likely way to break this build is
-    to paste a key into the wrong variable.
-
-    An `HTTPException`, like the 503 `get_db` raises, and not a bare
-    `RuntimeError`. That distinction is the whole point of the class: a plain
-    exception matches only the catch-all handler, so the client received
-    `500 INTERNAL_ERROR` -- reporting a configuration mistake as a server
-    crash, with a code that says retrying is worth trying. Subclassing
-    FastAPI's exception means the registered handler serialises it with the
-    `code` header intact, exactly as `DOCUMENT_NOT_FOUND` and
-    `DATABASE_UNAVAILABLE` are delivered, while `except
-    SummaryProviderUnavailable` still catches this one case and no other.
-
-    503 rather than 500 because the server is healthy and the records are
-    perfectly readable. What is missing is a summarizer, and it stays missing
-    until somebody configures one this build implements -- so retrying the
-    same request cannot help, which is the distinction `503` carries and
-    `500` does not.
-    """
+    """This build cannot serve the summary provider that was asked for."""
 
     def __init__(self, detail: str) -> None:
         super().__init__(
@@ -158,34 +70,11 @@ class SummaryProviderUnavailable(HTTPException):
 
 
 class SummaryProviderError(RuntimeError):
-    """A real provider call failed for a reason that might resolve itself.
-
-    A timeout, a refused connection, a `429`, a `5xx`, or a response that is
-    not the JSON this seam expects. `_generate` catches these and falls back to
-    `MockSummaryProvider`, storing the result with `is_mock` set so the UI
-    labels it as deterministic output rather than a model's.
-
-    No credential, header, request body or response body appears in the message
-    or the log line. The HTTP status is recorded because it is the one fact that
-    tells an operator whether to wait; the body is discarded because it can
-    quote the very medical text this system exists to avoid copying around.
-    """
+    """A real provider call failed for a reason that might resolve itself."""
 
 
 class SummaryProviderMisconfigured(SummaryProviderUnavailable):
-    """A real provider is selected but cannot be used as configured.
-
-    `AI_PROVIDER=openai` with an empty `AI_API_KEY` or `AI_MODEL`, or an
-    endpoint that answers `401`, `403`, `404` or `400`. These are permanent:
-    the same request would fail identically in ten minutes, so `_generate`
-    re-raises instead of falling back, and the client gets the same 503 it gets
-    for a provider that does not exist.
-
-    It subclasses `SummaryProviderUnavailable` because it is the same answer to
-    the reader -- this deployment has no working summarizer -- delivered for the
-    same reason, and it keeps `isWorthRetrying`'s refusal to retry
-    `SUMMARY_PROVIDER_UNAVAILABLE` correct without teaching it a second code.
-    """
+    """A real provider is selected but cannot be used as configured."""
 
 
 # ======================================================================
@@ -195,12 +84,7 @@ class SummaryProviderMisconfigured(SummaryProviderUnavailable):
 
 @dataclass(frozen=True)
 class SummaryProfile:
-    """The three profile fields a summary may legitimately use.
-
-    `phone`, `address` and `notes` are absent by construction, not by
-    convention: this object cannot carry them, so a future edit cannot leak
-    them into a provider call by forgetting a filter.
-    """
+    """The three profile fields a summary may legitimately use."""
 
     full_name: str = ""
     date_of_birth: Optional[str] = None
@@ -209,13 +93,7 @@ class SummaryProfile:
 
 @dataclass(frozen=True)
 class SummaryDocument:
-    """One readable record, as the provider sees it.
-
-    No `storage_key`, no `original_filename`, no `extraction_error` and no
-    `extracted_text`: the text is large, and the structured fields were
-    derived from it, so sending both would invite a provider to quote around
-    the extraction instead of using it.
-    """
+    """One readable record, as the provider sees it."""
 
     id: str
     title: str
@@ -243,11 +121,7 @@ class SummaryPayload:
 
 @dataclass(frozen=True)
 class SummaryItem:
-    """One attributed statement.
-
-    `source_document_id` is mandatory by construction. A provider cannot
-    construct a claim that does not say where it came from.
-    """
+    """One attributed statement."""
 
     text: str
     source_document_id: str
@@ -263,22 +137,14 @@ class ProviderSection:
 
 @dataclass(frozen=True)
 class SummaryDraft:
-    """A provider's answer.
-
-    Deliberately has no `disclaimer` field. There is nothing for a provider to
-    fill in, so there is nothing it can overwrite.
-    """
+    """A provider's answer."""
 
     overview: str
     sections: tuple[ProviderSection, ...]
 
 
 class SummaryProvider(Protocol):
-    """The seam Phase 4C plugs into.
-
-    `generate` is synchronous and must be deterministic for a given payload.
-    `SummaryService` already runs it off the event loop.
-    """
+    """The seam Phase 4C plugs into."""
 
     name: SummaryProviderName
     is_mock: bool
@@ -303,16 +169,7 @@ _UNDATED = "no date on the document"
 
 
 class MockSummaryProvider:
-    """Assembles the structured records into a summary. Adds no judgement.
-
-    Every sentence it produces is either a document's own words or a
-    mechanical restatement of a stored field. There is no vocabulary of
-    medical meaning in this class -- no condition words, no severity, no
-    advice -- so there is nothing here that could become a diagnosis. A value
-    becomes the string ``"Glucose: 126 mg/dL"`` and nothing further; whether
-    that means anything is not a question this class is allowed to have an
-    answer to.
-    """
+    """Assembles the structured records into a summary. Adds no judgement."""
 
     name: SummaryProviderName = "mock"
     is_mock = True
@@ -322,8 +179,6 @@ class MockSummaryProvider:
         documents = payload.documents
 
         # `_build_*` walks the documents and returns that section's items.
-        # `recent_records` and `chronological_overview` describe the same
-        # documents in opposite orders, so they are assembled here instead.
         by_key: dict[str, tuple[SummaryItem, ...]] = {
             key: self._walk(key, documents) for key, _ in SUMMARY_SECTIONS
         }
@@ -372,12 +227,6 @@ class MockSummaryProvider:
             )
 
         # Deliberately impersonal. One summary document is generated once and
-        # served unchanged to both audiences, so this sentence cannot address
-        # either of them -- "this patient has uploaded" reads as a report about
-        # a third party to the patient whose own records these are, and "you
-        # have uploaded" reads as though the doctor had done it. Naming the
-        # record set instead is correct for both, and the reader who owns it can
-        # tell from the name on the page whose it is.
         return (
             f"Assembled from {counts} in this record set. "
             f"About {who} ({', '.join(details)}).{excluded} "
@@ -399,13 +248,7 @@ class MockSummaryProvider:
     def _build_patient_overview(
         self, document: SummaryDocument
     ) -> list[SummaryItem]:
-        """Who wrote the record, and what the record says it is.
-
-        Identity-level facts from `extracted_data`. Profile details live in
-        the overview sentence instead: they come from the patient rather than
-        from a document, and putting them here would mean an item with no
-        source to point at.
-        """
+        """Who wrote the record, and what the record says it is."""
         items: list[SummaryItem] = []
         data = document.extracted_data
 
@@ -435,12 +278,7 @@ class MockSummaryProvider:
     def _build_medical_history(
         self, document: SummaryDocument
     ) -> list[SummaryItem]:
-        """Conditions the document itself states.
-
-        `stated_conditions` only ever contains an explicit statement phrase
-        (Phase 4A), stored under `text`. There is no path here from a lab
-        value to a condition.
-        """
+        """Conditions the document itself states."""
         return [
             _item(
                 document,
@@ -471,13 +309,7 @@ class MockSummaryProvider:
         ]
 
     def _build_abnormal_values(self, document: SummaryDocument) -> list[SummaryItem]:
-        """Lab values the page itself marked.
-
-        Only rows carrying a `flag`, and only because Phase 4A transcribed a
-        marker that was printed on the page -- never because the number was
-        compared against the printed range. The wording says whose judgement
-        the marker is.
-        """
+        """Lab values the page itself marked."""
         items: list[SummaryItem] = []
         for entry in _entries(document, "lab_values"):
             flag = _clean(entry.get("flag"))
@@ -493,11 +325,7 @@ class MockSummaryProvider:
         return items
 
     def _build_medications(self, document: SummaryDocument) -> list[SummaryItem]:
-        """Medications the record mentions.
-
-        Reported as written. No dose is adjusted, no interaction is checked,
-        and nothing here says the medication should or should not be taken.
-        """
+        """Medications the record mentions."""
         items: list[SummaryItem] = []
         for entry in _entries(document, "medications"):
             name = _clean(entry.get("name"))
@@ -531,12 +359,6 @@ class MockSummaryProvider:
 # ======================================================================
 
 # Kept as one module-level constant so there is exactly one prompt, and so a
-# test can assert on what the model was actually told rather than on a copy.
-#
-# The rules are ordered by how badly breaking them would hurt. The first block
-# is what the model must not do, the second is what it must do instead, and the
-# injection paragraph sits between them because a record is the only place
-# untrusted text enters this system.
 AI_SUMMARY_SYSTEM_PROMPT = """\
 You are the summarizer inside CAREVERSE, a system that stores medical documents
 and shows a doctor what they say. You are not a clinician.
@@ -616,37 +438,11 @@ the system supplies its own wording for an empty section.
 """
 
 # Section keys the model is allowed to return. Spelled out in the prompt and
-# enforced here as well: the prompt is a request, this is a filter, and
-# `_to_document` drops anything not in `SUMMARY_SECTIONS` regardless.
 _ALLOWED_SECTION_KEYS = frozenset(key for key, _ in SUMMARY_SECTIONS)
 
 
 class OpenAICompatibleSummaryProvider:
-    """One HTTP request to any OpenAI-compatible chat-completions endpoint.
-
-    Plain `httpx` against `{AI_BASE_URL}/chat/completions`, exactly as the
-    `smtplib` provider is plain `smtplib`. No vendor SDK: the wire format is
-    documented, the request is one POST, and an SDK would add a dependency and
-    a transitive-upgrade risk to a code path that handles medical data for no
-    benefit.
-
-    **The API key is held only here.** It arrives through `settings`, is used
-    only to build an `Authorization` header inside `_post`, and is never stored
-    on the payload, written into a log line, put in an exception message, or
-    returned to a client. `__repr__` is overridden so that a stray
-    `logger.info("%s", provider)` cannot print it -- the default repr for a
-    plain class would not have, which is exactly why the guarantee is worth
-    stating and asserting rather than relying on.
-
-    **Nothing is trusted on the way back.** The HTTP envelope, the message
-    content, and the JSON inside that are each parsed and checked before a
-    single `SummaryItem` is constructed, and `_to_document` then re-checks
-    every `source_document_id` against this patient's own documents.
-
-    `transport` exists so the test suite can drive the real request-construction
-    and response-parsing code against `httpx.MockTransport`. Tests never touch
-    the network and no real key is needed to exercise any of this.
-    """
+    """One HTTP request to any OpenAI-compatible chat-completions endpoint."""
 
     name: SummaryProviderName = "openai"
     is_mock = False
@@ -661,8 +457,6 @@ class OpenAICompatibleSummaryProvider:
         transport: Optional[httpx.BaseTransport] = None,
     ) -> None:
         # The key is stripped so a trailing newline in a `.env` file -- the
-        # single most common paste accident -- does not produce a 401 that
-        # looks like a wrong key. It is never normalized beyond that.
         self._api_key = api_key.strip()
         self._model = model.strip()
         self._base_url = base_url.strip().rstrip("/")
@@ -696,16 +490,7 @@ class OpenAICompatibleSummaryProvider:
     # ==================================================================
 
     def _request_body(self, payload: SummaryPayload) -> dict:
-        """The exact JSON that goes on the wire.
-
-        `temperature` is 0: the input is fixed, so the output should be too. It
-        also removes the one source of variation that has no business in a
-        clinical record.
-
-        `response_format: {"type": "json_object"}` asks for JSON rather than
-        prose. It is a request, not a guarantee, which is why `_parse` still
-        handles a fenced or bare-JSON reply.
-        """
+        """The exact JSON that goes on the wire."""
         return {
             "model": self._model,
             "temperature": 0,
@@ -715,9 +500,6 @@ class OpenAICompatibleSummaryProvider:
                 {
                     "role": "user",
                     # JSON rather than prose so that a record containing
-                    # something that looks like an instruction is visibly a
-                    # string value inside a data structure, not a command in a
-                    # conversation.
                     "content": json.dumps(
                         self._serialize_input(payload),
                         ensure_ascii=False,
@@ -729,19 +511,7 @@ class OpenAICompatibleSummaryProvider:
 
     @staticmethod
     def _serialize_input(payload: SummaryPayload) -> dict:
-        """`SummaryPayload` as JSON. An allowlist, not a filter over a document.
-
-        Every field is named explicitly, so a future column added to
-        `SummaryDocument` is not sent until somebody adds it here on purpose --
-        which is the opposite of the failure mode that matters for this call.
-        `phone`, `address`, `notes`, `storage_key`, `stored_filename`,
-        `extraction_error` and `extracted_text` have no line here and cannot
-        acquire one by accident.
-
-        Six record fields go out, and `SummaryDocument` carries a seventh,
-        `character_count`, that does not. It is a size hint for the extraction
-        pipeline; nothing in a summary needs it, so it stays on this side.
-        """
+        """`SummaryPayload` as JSON. An allowlist, not a filter over a document."""
         return {
             "patient": {
                 "full_name": payload.profile.full_name,
@@ -763,14 +533,7 @@ class OpenAICompatibleSummaryProvider:
         }
 
     def _post(self, body: dict) -> Any:
-        """Send one request. No retries -- see the class docstring's timeout note.
-
-        A single attempt, with a finite timeout taken from `AI_TIMEOUT_SECONDS`.
-        There is no retry loop: a summary is regenerated on demand and a
-        transient failure degrades honestly to the deterministic provider, so
-        retrying would only multiply latency and provider spend without changing
-        the outcome a reader sees.
-        """
+        """Send one request. No retries -- see the class docstring's timeout note."""
         url = f"{self._base_url}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self._api_key}",
@@ -781,15 +544,11 @@ class OpenAICompatibleSummaryProvider:
                 response = client.post(url, headers=headers, json=body)
         except httpx.TimeoutException as exc:
             # Message names no URL and no key: `httpx`'s own text can include
-            # the request URL, and the operator needs the failure kind, not the
-            # request line.
             raise SummaryProviderError(
                 "the summary provider did not respond within the configured timeout"
             ) from exc
         except httpx.HTTPError as exc:
             # ConnectError, ReadError, RemoteProtocolError and the rest. The
-            # endpoint being unreachable is a runtime fault, not a
-            # misconfiguration, so `_generate` falls back rather than refusing.
             raise SummaryProviderError(
                 "the summary provider could not be reached"
             ) from exc
@@ -797,18 +556,11 @@ class OpenAICompatibleSummaryProvider:
         return self._read(response)
 
     def _read(self, response: httpx.Response) -> Any:
-        """Turn a response into JSON, or raise the right kind of failure.
-
-        The status decides whether this is permanent or transient, because that
-        is the distinction the reader's screen depends on: a `401` will still be
-        a `401` in ten minutes, while a `429` or a `503` might not be.
-        """
+        """Turn a response into JSON, or raise the right kind of failure."""
         status_code = response.status_code
 
         if status_code >= 400:
             # The status is logged; the body is not. A provider's error body
-            # can echo the submitted request -- including the prompt -- and this
-            # prompt contains a patient's extracted medical data.
             logger.error(
                 "summary provider openai returned HTTP %d for model %s",
                 status_code,
@@ -828,8 +580,6 @@ class OpenAICompatibleSummaryProvider:
             return response.json()
         except ValueError as exc:
             # An HTML error page or a truncated body from something that is not
-            # an API at all. Not a configuration value we can name, so it is a
-            # runtime fault and the deterministic fallback takes over.
             raise SummaryProviderError(
                 "the summary provider returned a response that was not JSON"
             ) from exc
@@ -839,14 +589,7 @@ class OpenAICompatibleSummaryProvider:
     # ==================================================================
 
     def _parse(self, envelope: Any) -> SummaryDraft:
-        """Validate the provider's answer before it becomes a `SummaryDraft`.
-
-        Three untrusted layers, checked in order: the HTTP envelope, the
-        `choices[0].message.content` string, and the JSON inside it. Anything
-        that does not match raises `SummaryProviderError`, which is what makes
-        the deterministic fallback the answer rather than a half-populated
-        document that looks like a model's output.
-        """
+        """Validate the provider's answer before it becomes a `SummaryDraft`."""
         content = self._message_content(envelope)
         parsed = self._json_object(content)
         return self._draft(parsed)
@@ -881,14 +624,7 @@ class OpenAICompatibleSummaryProvider:
 
     @staticmethod
     def _json_object(content: str) -> dict:
-        """Parse the model's own JSON, tolerating a code fence.
-
-        A fence is the one wrapper worth tolerating: it is what a model emits
-        when asked for JSON in prose, and it carries no meaning. Anything else
-        -- prose, a JSON array, a truncated object -- is a real failure, because
-        accepting a shape we did not ask for is how unstructured text becomes
-        clinical prose with no section and no source.
-        """
+        """Parse the model's own JSON, tolerating a code fence."""
         text = content.strip()
         if text.startswith("```"):
             lines = text.splitlines()
@@ -911,19 +647,7 @@ class OpenAICompatibleSummaryProvider:
 
     @staticmethod
     def _draft(parsed: dict) -> SummaryDraft:
-        """Build the draft, dropping anything malformed item by item.
-
-        The server stays the authority on attribution: a missing or
-        non-string `source_document_id` becomes `""` here and is dropped by
-        `_to_document`, because an id this provider cannot read is an id it
-        cannot have been given. Nothing is re-attributed to a document that
-        merely looks plausible.
-
-        A section key outside `SUMMARY_SECTIONS` is dropped at this stage as
-        well as in `_to_document`. Two filters, on purpose: this one keeps
-        unexpected keys out of the draft at all, and the other is what makes the
-        stored shape impossible to widen.
-        """
+        """Build the draft, dropping anything malformed item by item."""
         raw_sections = parsed.get("sections", [])
         if raw_sections is None:
             raw_sections = []
@@ -979,9 +703,6 @@ class OpenAICompatibleSummaryProvider:
 
 
 # `401`/`403`: the credential was rejected. `404`: wrong `AI_BASE_URL`, or a
-# model name this endpoint does not serve. `400`/`422`: the request itself was
-# refused, which for a fixed prompt means the model name is wrong.
-# Permanent in all five -- retrying cannot change any of them.
 _PERMANENT_PROVIDER_STATUSES = frozenset({400, 401, 403, 404, 422})
 
 
@@ -1003,20 +724,7 @@ _override: Optional[SummaryProvider] = None
 
 
 def build_openai_provider() -> SummaryProvider:
-    """Construct the real provider from settings, or refuse to.
-
-    Validation happens here, at the switch point, rather than inside the
-    provider class. This is a deployment mistake and it is permanent: an empty
-    `AI_API_KEY`, a cleared `AI_MODEL`, or a non-positive timeout will still be
-    wrong in ten minutes. Answering it with a 503 that names the variable to set
-    is more useful than a `401` from a third party that has no idea what
-    CAREVERSE calls its settings.
-
-    `AI_MODEL` is not defaulted here even though `config.py` declares one. If
-    somebody clears it, picking a model for them would mean this build choosing
-    which model reads a patient's records -- a decision that belongs in
-    configuration, not in a fallback.
-    """
+    """Construct the real provider from settings, or refuse to."""
     api_key = settings.ai_api_key.strip()
     if not api_key:
         raise SummaryProviderMisconfigured(
@@ -1048,9 +756,6 @@ def build_openai_provider() -> SummaryProvider:
 
 
 # `openai` is built by a factory rather than instantiated at module scope so
-# that a missing API key surfaces as a 503 when the provider is requested,
-# instead of preventing this module -- and therefore the whole app -- from
-# importing.
 _IMPLEMENTED_PROVIDERS: dict[str, Callable[[], SummaryProvider]] = {
     "mock": lambda: MOCK_PROVIDER,
     "openai": build_openai_provider,
@@ -1058,13 +763,7 @@ _IMPLEMENTED_PROVIDERS: dict[str, Callable[[], SummaryProvider]] = {
 
 
 def get_summary_provider() -> SummaryProvider:
-    """Resolve the configured provider.
-
-    Returns a fresh instance per call rather than a module-level singleton.
-    That is what lets `settings` be the single source of truth at the moment
-    the provider is needed, and it means a key or model that is absent is
-    reported as a misconfiguration rather than being captured at import time.
-    """
+    """Resolve the configured provider."""
     if _override is not None:
         return _override
 
@@ -1072,12 +771,6 @@ def get_summary_provider() -> SummaryProvider:
     factory = _IMPLEMENTED_PROVIDERS.get(configured)
     if factory is None:
         # The rejected value is deliberately not echoed. This message is now
-        # rendered to the client, and `AI_PROVIDER` is a free-text variable
-        # that someone can paste anything into -- including a key pasted into
-        # the wrong name, which this response would then hand back. Naming the
-        # providers that *do* work is both safer and more useful than
-        # repeating back what was asked for. The offending value stays in the
-        # server log, where it belongs.
         logger.error(
             "AI_PROVIDER is set to an unimplemented value; refusing to guess. "
             "Implemented providers: %s",
@@ -1118,11 +811,7 @@ def _clean(value: Any) -> str:
 
 
 def _entries(document: SummaryDocument, key: str) -> list[dict]:
-    """Read one list out of `extracted_data`, defensively.
-
-    Phase 4A guarantees the shape, but a provider should not be the thing
-    that turns a malformed stored field into a 500 on a doctor's screen.
-    """
+    """Read one list out of `extracted_data`, defensively."""
     raw = document.extracted_data.get(key)
     if not isinstance(raw, list):
         return []
@@ -1153,11 +842,7 @@ def _record_line(document: SummaryDocument) -> str:
 
 
 def _lab_line(entry: Mapping[str, Any]) -> str:
-    """Render a lab row as the document printed it.
-
-    The unit and the reference range appear only when the document carried
-    them. Nothing is rounded, converted, or compared.
-    """
+    """Render a lab row as the document printed it."""
     name = _clean(entry.get("name"))
     value = _clean(entry.get("value"))
     unit = _clean(entry.get("unit"))
@@ -1174,9 +859,6 @@ def _lab_line(entry: Mapping[str, Any]) -> str:
 # ======================================================================
 
 # Only these document fields are read. `extracted_text`, `storage_key`,
-# `original_filename`, `extraction_error`, `mime_type` and `size_bytes` stay
-# in MongoDB -- they are either large, internal, or both, and a summary needs
-# none of them.
 _DOCUMENT_PROJECTION = {
     "_id": 1,
     "title": 1,
@@ -1194,11 +876,7 @@ _EPOCH = datetime.min.replace(tzinfo=timezone.utc)
 
 @dataclass(frozen=True)
 class _RecordSet:
-    """The readable documents for one patient, plus what was excluded.
-
-    Loaded in a single scoped query so the staleness check, the provider
-    payload and the persisted counts all come from one consistent read.
-    """
+    """The readable documents for one patient, plus what was excluded."""
 
     documents: tuple[SummaryDocument, ...]
     unreadable_count: int
@@ -1206,13 +884,7 @@ class _RecordSet:
 
 
 class SummaryService:
-    """Build, validate and persist one summary per patient.
-
-    Only ever called *after* the route dependency has authorized the caller
-    for `patient_id`. Every method takes that already-authorized id as an
-    argument rather than re-deriving it, so no caller can pass an id that has
-    not been checked.
-    """
+    """Build, validate and persist one summary per patient."""
 
     def __init__(self, db: Database, provider: Optional[SummaryProvider] = None) -> None:
         self._db = db
@@ -1226,13 +898,7 @@ class SummaryService:
     # ==================================================================
 
     def get_summary(self, patient_id: str, force: bool = False) -> dict:
-        """Return the current summary, generating it if missing or stale.
-
-        `force=True` is the explicit-regenerate path. `force=False` is the
-        GET path: regenerate only when the readable record set has changed
-        since the persisted summary was written, so opening the screen twice
-        does not rewrite the document twice.
-        """
+        """Return the current summary, generating it if missing or stale."""
         records = self._load_records(patient_id)
         persisted = self._summaries.find_one({"patient_id": patient_id})
 
@@ -1263,13 +929,7 @@ class SummaryService:
     # ==================================================================
 
     def _load_records(self, patient_id: str) -> _RecordSet:
-        """One scoped query. Completed documents only, oldest first.
-
-        `needs_ocr` and `failed` documents contribute nothing but a count:
-        their text is either absent or wrong, and Phase 4A deliberately left
-        `extracted_data` empty for them. Counting them is how the UI can say
-        "3 of 5 records are in this summary" instead of quietly dropping two.
-        """
+        """One scoped query. Completed documents only, oldest first."""
         readable: list[dict] = []
         unreadable = 0
         for raw in self._documents.find(
@@ -1327,22 +987,7 @@ class SummaryService:
 
     @staticmethod
     def _is_stale(persisted: PatientSummaryDocument, records: _RecordSet) -> bool:
-        """True when the persisted summary no longer describes these records.
-
-        Three comparisons, no cache layer and no new stored field:
-
-          * the set of readable document ids changed -- something was
-            uploaded or deleted since this was written;
-          * the unreadable count changed -- a record that could not be read
-            has since been read, or one that could has gone;
-          * a readable document is newer than the summary -- a Phase 2
-            document is immutable after upload, so a later `uploaded_at`
-            means a different set, not a re-saved one.
-
-        Being wrong in one direction costs one cheap deterministic pass.
-        Being wrong in the other costs a doctor reading a summary that has
-        silently fallen behind the record list beside it.
-        """
+        """True when the persisted summary no longer describes these records."""
         stored_ids = {str(value) for value in persisted.get("source_document_ids", [])}
         if stored_ids != {document.id for document in records.documents}:
             return True
@@ -1364,35 +1009,12 @@ class SummaryService:
     def _generate(
         self, payload: SummaryPayload
     ) -> tuple[SummaryProvider, SummaryDraft]:
-        """Call the provider, falling back to the deterministic one.
-
-        Two kinds of failure, deliberately handled differently.
-
-        **A misconfiguration propagates.** `SummaryProviderMisconfigured` means
-        this deployment has no usable summarizer: a missing key, a rejected
-        credential, an unknown model. Falling back there would replace a
-        provider somebody deliberately configured with a pattern matcher and
-        label the result "Demo summary" -- technically honest, but it answers a
-        question nobody asked and hides a deployment that is broken. The client
-        gets the 503, and nothing is persisted.
-
-        **A runtime fault falls back.** A timeout, a refused connection, a
-        `429`, a `5xx`, or a response that is not the JSON this seam expects.
-        Here the honest answer is the deterministic summary, stored with
-        `is_mock` set so the UI labels it. The doctor sees their records
-        summarized rather than an error page, and the label says no language
-        model produced it.
-
-        The log line records that a fallback happened and nothing else -- no
-        document id, no title, no extracted value, no provider response.
-        """
+        """Call the provider, falling back to the deterministic one."""
         provider = self._provider or get_summary_provider()
         try:
             return provider, provider.generate(payload)
         except SummaryProviderMisconfigured:
             # Must precede the bare `except` below. It is an `HTTPException`,
-            # so the catch-all would otherwise swallow a permanent
-            # configuration problem into a demo summary.
             raise
         except Exception:
             logger.warning(
@@ -1409,13 +1031,7 @@ class SummaryService:
         source_ids: Sequence[str],
         unreadable_count: int,
     ) -> dict:
-        """Validate provider output and assemble the stored document.
-
-        Everything that can reject a claim happens here, before anything is
-        written: unknown sections are dropped, the fixed section order is
-        re-imposed, and every item is checked against the ids that really do
-        belong to this patient.
-        """
+        """Validate provider output and assemble the stored document."""
         known_keys = {key for key, _ in SUMMARY_SECTIONS}
         allowed = set(source_ids)
         by_key: dict[str, list[dict]] = {}
@@ -1487,12 +1103,7 @@ class SummaryService:
 
 
 def _sort_key(raw: dict) -> tuple:
-    """Oldest first, by the date on the document, then by upload time.
-
-    Undated documents sort last rather than first, so a record with a printed
-    date is never pushed off the front of a chronological list by a file whose
-    date nobody could read.
-    """
+    """Oldest first, by the date on the document, then by upload time."""
     date = _clean(raw.get("document_date"))
     return (
         0 if date else 1,

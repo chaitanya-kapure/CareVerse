@@ -1,13 +1,4 @@
-"""`patient_summaries` collection.
-
-One summary per patient. Written on demand -- the GET endpoint regenerates
-when the readable record set has changed since the last write, and the
-explicit regenerate endpoint always rewrites -- so it reflects the current
-record set without being rebuilt on every page render.
-
-`provider` and `is_mock` are stored, not inferred at read time, so the UI can
-honestly label a deterministic fallback summary as demo output.
-"""
+"""`patient_summaries` collection."""
 
 from datetime import datetime
 from typing import Any, Literal, Optional, TypedDict
@@ -16,14 +7,7 @@ SummaryProvider = Literal["mock", "openai", "anthropic", "custom"]
 
 
 class SummarySection(TypedDict, total=False):
-    """A titled block of the summary.
-
-    `items` are objects, never bare strings: each carries `text` plus the
-    `source_document_id` it was taken from, and optionally the verbatim
-    `source_text` the fact was copied from. A claim that cannot name its
-    document is dropped before it is persisted, so this list is the reason a
-    doctor can click any line and land on the record behind it.
-    """
+    """A titled block of the summary."""
     key: str
     title: str
     items: list[Any]

@@ -1,12 +1,4 @@
-/**
- * Patient-side doctor authorization.
- *
- * This is the only way access comes into existence. A patient names a doctor
- * and the server records one grant; there is no request from the doctor, no
- * invitation, no approval queue and no way to enumerate the patients in the
- * system. The patient's id is never sent from the browser -- the server
- * derives it from the session -- so this call cannot be aimed at anyone else.
- */
+ /** Patient-side doctor authorization. */
 
 import { api } from "./api";
 import type {
@@ -18,12 +10,7 @@ import type {
 const BASE = "/patients/me/access";
 
 export const accessService = {
-  /**
-   * Every grant this patient has issued, including revoked ones.
-   *
-   * A patient is entitled to see who *used to* have access, so the list is not
-   * filtered to live grants.
-   */
+   /** Every grant this patient has issued, including revoked ones. */
   async list(): Promise<AccessGrantListResponse> {
     const { data } = await api.get<AccessGrantListResponse>(BASE);
     return data;

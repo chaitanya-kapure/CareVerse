@@ -1,31 +1,4 @@
-"""The PDF document pipeline: upload -> validate -> store -> extract -> save.
-
-Order of operations is the design here, not incidental:
-
-    validate (cheap, no writes)
-    -> read with a size cap
-    -> magic-byte check
-    -> write the file
-    -> insert the row as `processing`
-    -> extract
-    -> update the row with the outcome
-
-Two consequences worth stating, because both are invisible until they fail:
-
-  * Nothing is persisted until the file is known to be a well-formed, allowed,
-    correctly sized PDF. Validation failures therefore leave no file and no
-    row behind.
-  * The row exists *before* extraction runs. Text extraction is the only part
-    of the pipeline that touches the content of an untrusted file, and the one
-    most likely to fail. If it throws, the file and its metadata survive with
-    `extraction_status = "failed"` -- the patient keeps the document they
-    uploaded and can still download it. An extraction failure never fails the
-    upload.
-
-Deletion runs the other way round: the file first, then the row. An orphaned
-row is a visible, retryable inconvenience; an orphaned copy of a medical
-document sitting on disk is neither.
-"""
+"""The PDF document pipeline: upload -> validate -> store -> extract -> save."""
 
 import asyncio
 import logging
@@ -54,8 +27,6 @@ logger = logging.getLogger(__name__)
 PDF_MAGIC = b"%PDF-"
 
 # Read in chunks rather than slurping the whole body: a client can keep
-# streaming, and an unbounded `await file.read()` would let a 2 GB request
-# occupy memory before the size check could ever run.
 CHUNK_SIZE = 256 * 1024
 
 # Readable fallback derived from the upload name when the patient supplies no
@@ -176,8 +147,6 @@ class DocumentService:
             inserted = self._docs.insert_one(document)
         except Exception:
             # The row is the thing that failed, so undo the file. Leaving it
-            # behind would silently accumulate medical documents that nothing
-            # can ever list or delete.
             logger.error("failed to persist document metadata")
             try:
                 self.driver.delete(key)
@@ -186,10 +155,6 @@ class DocumentService:
             raise
 
         # --- 3. extract ------------------------------------------------
-        # Off the event loop: pypdf is CPU-bound and parses an untrusted
-        # file, so one crafted PDF must not stall every other request. The
-        # structured pass runs in the same thread for the same reason -- it is
-        # regex work over that same text, on up to 500,000 characters of it.
         outcome = await asyncio.to_thread(_extract_text_and_structure, content, meta.category)
 
         # A failure here still returns the document. It is recorded as
@@ -338,13 +303,7 @@ class DocumentService:
     # ==================================================================
 
     def _find(self, patient_id: str, document_id: str) -> MedicalDocumentDocument:
-        """Load one document, scoped to its owner.
-
-        The scope is in the query itself rather than in a comparison after it,
-        so a document belonging to another patient is indistinguishable from
-        one that does not exist. Both answer 404: replying 403 would confirm
-        that someone else's record with that id is real.
-        """
+        """Load one document, scoped to its owner."""
         if not ObjectId.is_valid(document_id):
             raise errors.not_found("Document not found", code="DOCUMENT_NOT_FOUND")
 
@@ -357,8 +316,6 @@ class DocumentService:
 
 
 # ---------------------------------------------------------------------
-# module helpers
-# ---------------------------------------------------------------------
 
 
 def _utcnow() -> datetime:
@@ -366,22 +323,7 @@ def _utcnow() -> datetime:
 
 
 def _extract_text_and_structure(content: bytes, category: str = "other") -> ExtractionOutcome:
-    """Text first, and only then structured facts.
-
-    The ordering is the safety property, not an implementation detail. A
-    document that came back `needs_ocr` or `failed` has no text to read, so
-    this returns before the structured pass is ever reached -- there is no
-    branch anywhere that could build `extracted_data` out of a status or a
-    filename. Those documents keep `extracted_data = {}` exactly as they did
-    in Phase 2, and a future summary can tell "no facts found" apart from
-    "this record was never readable".
-
-    A document that extracted cleanly but contains nothing this parser
-    recognises also ends up with `{}`. That is the same distinction, and it is
-    why this must not raise: a parser that could not find a lab value has not
-    failed to extract a lab value, and must not turn a stored document into a
-    failed upload by saying so.
-    """
+    """Text first, and only then structured facts."""
     outcome = extraction_service.extract_text(content)
     if outcome.get("extraction_status") != "completed":
         return outcome
@@ -411,12 +353,7 @@ def _extract_text_and_structure(content: bytes, category: str = "other") -> Extr
 
 
 def _safe_filename(name: str) -> str:
-    """Reduce an upload name to a displayable basename.
-
-    Any directory component is dropped: the client controls this string and
-    it will be echoed back into the UI and into a Content-Disposition header,
-    where `../../` and newlines have business being nowhere.
-    """
+    """Reduce an upload name to a displayable basename."""
     base = (name or "").replace("\\", "/").rsplit("/", 1)[-1]
     base = base.replace("\r", " ").replace("\n", " ").replace("\x00", "")
     base = base.strip().lstrip(".")

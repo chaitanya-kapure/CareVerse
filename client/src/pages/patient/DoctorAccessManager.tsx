@@ -14,23 +14,7 @@ import { formatDateTime } from "../../utils/format";
 
 const OBJECT_ID = /^[0-9a-fA-F]{24}$/;
 
-/**
- * Who can read this patient's records.
- *
- * This is the whole access mechanism, and it is deliberately small. There is
- * no doctor directory, no search, no invitation and no approval queue: the
- * patient pastes the id of the doctor they already have a relationship with.
- *
- * A directory would be the obvious convenience and the wrong trade. It would
- * turn this screen into a roster of every clinician registered on the
- * platform, and it would let anyone with an account enumerate staff. A
- * patient who is seeing a doctor can get that doctor's id from them; a
- * patient who is *not* cannot learn who works here.
- *
- * Revocation is here for the same reason the grant is: access to medical
- * records has to be withdrawable by the person whose records they are, and a
- * one-way door is not something to ship in a health product.
- */
+ /** Who can read this patient's records. */
 export default function DoctorAccessManager() {
   const queryClient = useQueryClient();
   const [doctorId, setDoctorId] = useState("");
@@ -39,10 +23,6 @@ export default function DoctorAccessManager() {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   // `isPending`, not `isLoading`: on the first render a React Query
-  // observation is pending but not yet fetching. An `isLoading` guard would
-  // drop through to the empty state and tell a patient who has just
-  // authorized a doctor that nobody has access -- the most alarming possible
-  // message to show someone about their own medical records.
   const { data, isPending, error } = useQuery({
     queryKey: ["patient-access"],
     queryFn: accessService.list,
@@ -188,8 +168,6 @@ export default function DoctorAccessManager() {
                       onBlur={() => setConfirmingId(null)}
                       onClick={() => {
                         // Two clicks, not a modal: the control stays
-                        // keyboard-reachable and a stray click cannot end
-                        // someone's access.
                         if (confirmingId === entry.id) revoke.mutate(entry.id);
                         else setConfirmingId(entry.id);
                       }}

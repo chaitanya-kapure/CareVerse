@@ -1,17 +1,4 @@
-"""Schemas for the doctor-access and grant endpoints.
-
-Two directions, kept in one file because they are the two sides of the same
-row in `patient_access`:
-
-  * `AccessGrant*`        -- what a patient grants and what they can see.
-  * `DoctorPatient*`      -- what an authorized doctor may read.
-
-The doctor's view of a document reuses the Phase 2 response models exactly
-rather than declaring a parallel set. A record a doctor sees and a record the
-patient sees are the same object; a second schema for the doctor would be an
-invitation for the two to drift apart, and the doctor's copy is the one with
-fewer fields to check.
-"""
+"""Schemas for the doctor-access and grant endpoints."""
 
 from datetime import datetime
 from typing import Optional
@@ -35,12 +22,7 @@ MAX_NOTE_LENGTH = 500
 
 
 class AccessGrantRequest(BaseModel):
-    """Body for granting one doctor access.
-
-    `doctor_id` is the only field, and it is the doctor being *authorized* --
-    not a patient being targeted. The route carries no patient id, so the
-    grant is always issued by the caller on their own behalf.
-    """
+    """Body for granting one doctor access."""
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -51,8 +33,6 @@ class AccessGrantRequest(BaseModel):
     @classmethod
     def _validate_doctor_id(cls, value: str) -> str:
         # Shape only. Whether the id names a real doctor is a service-level
-        # question, answered with the same 404 a patient would get for any
-        # other unknown id.
         if len(value) != 24 or any(c not in "0123456789abcdefABCDEF" for c in value):
             raise ValueError("Doctor id is not valid")
         return value
@@ -80,13 +60,7 @@ class AccessGrantListResponse(BaseModel):
 
 
 class DoctorPatientSummary(BaseModel):
-    """One row in the doctor's authorized-patient list.
-
-    Name, the identifiers already on the profile, and how many records the
-    patient has. No derived field, no health summary, no trend: a count of
-    uploaded PDFs is a fact about the file store, not a statement about the
-    patient.
-    """
+    """One row in the doctor's authorized-patient list."""
 
     patient_id: str
     full_name: str
@@ -102,9 +76,6 @@ class DoctorPatientListResponse(BaseModel):
 
 
 # A doctor's view of a patient is the patient's own profile response. The
-# patient is not a reduced or filtered version of themselves: the same
-# serializer and the same fields, so a doctor and the patient read identical
-# data and there is no second shape to audit.
 DoctorPatientProfileResponse = PatientProfileResponse
 
 # Documents come back in the Phase 2 shapes, unchanged.

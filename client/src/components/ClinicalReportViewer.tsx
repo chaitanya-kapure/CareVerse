@@ -10,6 +10,7 @@ import {
   getClinicalStatusDetails,
   formatPatientDisplayId,
   formatDocumentDisplayId,
+  isValidLabReading,
 } from "../utils/clinicalFormat";
 import { formatBytes, formatCategory, formatDate, formatDateTime } from "../utils/format";
 import type { MedicalDocumentDetail } from "../types";
@@ -81,7 +82,9 @@ export default function ClinicalReportViewer({
   };
 
   const analysis = extractedData.analysis_verdict;
-  const rawLabValues = extractedData.lab_values ?? [];
+  const rawLabValues = (extractedData.lab_values ?? []).filter((item) =>
+    isValidLabReading(item.name, item.value, item.unit)
+  );
   const medications = extractedData.medications ?? [];
   const conditions = extractedData.stated_conditions ?? [];
 

@@ -19,34 +19,7 @@ import {
   NOT_A_DIAGNOSIS_NOTICE,
 } from "../../utils/disclaimers";
 
-/**
- * The signed-in patient's own summary.
- *
- * The same document a doctor reads, from the other side, and rendered in the
- * same order for the same reason: the disclaimer and the mock label come
- * before anything the summary says, so a claim is never reached without having
- * first been told what produced it and that it is not a clinical judgment.
- * A patient is the audience most likely to read this as a clinical result,
- * because they are the one who uploaded the paperwork and knows what was
- * worrying them. Wording it identically to the doctor screen is what stops the
- * two from implying different levels of authority.
- *
- * Three things are deliberately absent.
- *
- * There is no rebuild button. `/patients/me/summary` generates on demand and
- * has no POST sibling, so the only way to refresh this screen is to reload it
- * — and that is honest, because a patient has nothing to add to a summary
- * whose every line is copied from a record they already uploaded.
- *
- * There is no patient id anywhere. Not in the path, not in the query, so there
- * is nothing on this screen for a patient to change in order to read somebody
- * else's summary. The server resolves the id from the token.
- *
- * And the record list is fetched separately, exactly as on the doctor screen.
- * The summary carries ids rather than titles, and the record list is what the
- * patient actually uploaded. Where the two disagree — always, for a scanned
- * document — the record list is the truth.
- */
+ /** The signed-in patient's own summary. */
 export default function PatientSummaryPage() {
   const summary = useQuery({
     queryKey: ["own-summary"],
@@ -61,9 +34,6 @@ export default function PatientSummaryPage() {
   });
 
   // `isPending`, not `isLoading`: a first render is pending-but-idle, and an
-  // `isLoading` guard falls through to the success path and renders a summary
-  // full of "not found in the uploaded records" for a patient who has simply
-  // not loaded yet.
   if (summary.isError || records.isError) {
     return (
       <>

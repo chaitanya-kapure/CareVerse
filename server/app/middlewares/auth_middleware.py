@@ -1,14 +1,4 @@
-"""Authentication and authorization dependencies.
-
-This is the security boundary for CAREVERSE. The rules it enforces:
-
-  * A patient may read/write ONLY documents that belong to them.
-  * A doctor may read ONLY patients that have granted them access.
-  * Role alone never grants record access.
-
-Frontend route guards are a UX convenience only. Every rule below is
-re-checked here on the server, because the client can be bypassed.
-"""
+"""Authentication and authorization dependencies."""
 
 from typing import Annotated, Literal
 
@@ -34,15 +24,7 @@ AccessMode = Literal["owner", "granted"]
 
 
 def get_token_payload(request: Request) -> dict:
-    """Validate the bearer token. Deliberately does NOT touch the database.
-
-    Splitting this out of `get_current_user` fixes the dependency order:
-    FastAPI resolves dependencies before calling a handler, so a single
-    combined dependency would raise 503 (database down) before ever
-    checking the token. Authenticating first means an invalid or missing
-    token is a 401 regardless of database state, and an unauthenticated
-    caller cannot probe whether the database is up.
-    """
+    """Validate the bearer token. Deliberately does NOT touch the database."""
     auth_header = request.headers.get("Authorization", "")
     scheme, _, token = auth_header.partition(" ")
     if scheme.lower() != "bearer" or not token:
@@ -63,12 +45,7 @@ TokenPayload = Annotated[dict, Depends(get_token_payload)]
 
 
 def get_current_user(payload: TokenPayload, db: DbDep) -> UserDocument:
-    """Resolve a validated token into a live user document.
-
-    The user is re-read from the database on every request rather than
-    trusted from the token payload, so a disabled account or a changed role
-    takes effect immediately instead of when the token expires.
-    """
+    """Resolve a validated token into a live user document."""
     user = get_users(db).find_one({"_id": ObjectId(payload["sub"])})
     if user is None:
         raise errors.unauthorized("User not found", code="USER_NOT_FOUND")
@@ -106,22 +83,7 @@ def resolve_patient_id(raw_id: str) -> str:
 
 
 def assert_own_records(db: Database, user: UserDocument) -> str:
-    """Confirm the caller may act on their own records, and return that id.
-
-    For `/patients/me/*` routes the patient id is never in the request, so
-    the comparison inside `assert_patient_access` always resolves to OWNER.
-    It is still called, rather than skipped, for two reasons:
-
-      * it is the one place a doctor is refused. A doctor who reaches a
-        patient-only handler is rejected here instead of being allowed to
-        operate on their own id as if it were a patient's;
-      * every query below uses the id this function returns. Ownership is
-        therefore decided once, here, and never re-derived at a call site.
-
-    The id it returns is what all subsequent queries are scoped by -- which is
-    what stops "change the id in the request" from working, even though these
-    routes take no id at all today.
-    """
+    """Confirm the caller may act on their own records, and return that id."""
     if user.get("role") != "patient":
         # Reached only if a route forgot `require_roles("patient")`. Fail
         # closed with a message that says what is actually wrong.
@@ -139,12 +101,7 @@ def assert_patient_access(
     user: UserDocument,
     patient_id: str,
 ) -> AccessMode:
-    """Return OWNER or GRANTED, or raise 403.
-
-    The single place where "may this caller see this patient?" is decided.
-    Both the patient routes and the doctor routes call it, so there is exactly
-    one rule to audit.
-    """
+    """Return OWNER or GRANTED, or raise 403."""
     role = user.get("role")
     caller_id = str(user["_id"])
 

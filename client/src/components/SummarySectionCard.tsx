@@ -6,33 +6,11 @@ import { EMPTY_SECTION_NOTE } from "../utils/disclaimers";
 
 interface SummarySectionCardProps {
   section: SummarySection;
-  /**
-   * Where one of this section's source documents lives, for the audience
-   * reading it.
-   *
-   * A function rather than a path template because the two audiences are not
-   * at the same URL: a doctor reads `/doctor/patients/:patientId/records/:id`
-   * and a patient reads `/patient/records/:id`. Both routes already exist, and
-   * both authorize the id server-side, so a link here is a shortcut to the
-   * record — never the authorization.
-   */
+   /** Where one of this section's source documents lives, for the audience */
   documentHref: (documentId: string) => string;
 }
 
-/**
- * One summary section: its items, or an explicit statement that it found
- * nothing.
- *
- * Every item links to the record it was copied from. That is the whole reason
- * a summary is worth reading in a health-records system: each line is one
- * click from the document a clinician can hold in their hand, so nothing here
- * has to be taken on trust.
- *
- * The empty state is the important case. A section that rendered as nothing at
- * all would be indistinguishable from one the system chose not to show, which
- * reads as "nothing abnormal here" — a clinical claim this screen has no
- * business making. So an empty section says so, in words, every time.
- */
+ /** One summary section: its items, or an explicit statement that it found */
 export default function SummarySectionCard({
   section,
   documentHref,

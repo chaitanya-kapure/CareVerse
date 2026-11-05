@@ -7,19 +7,7 @@ import Button from "../components/ui/Button";
 import Alert from "../components/ui/Alert";
 import { TextInput } from "../components/ui/Field";
 
-/**
- * Password recovery, as four steps in one screen.
- *
- * Deliberately a single page rather than four routes: the intermediate
- * state (the address, and the single-use reset token) has nowhere
- * meaningful to live between navigations, and pushing it into the URL or
- * sessionStorage would widen the number of places a live credential could
- * be read from.
- *
- * No step ever displays the OTP. The code arrives by email; in local
- * development the server logs it, and the developer types it here. Nothing
- * on this screen can reveal a code it was never given.
- */
+ /** Password recovery, as four steps in one screen. */
 
 type Step = "email" | "otp" | "password" | "done";
 
@@ -46,8 +34,6 @@ export default function ForgotPasswordPage() {
   const [expiry, setExpiry] = useState(0);
 
   // One interval drives both countdowns. The effect depends only on whether
-  // a countdown is still running, and the state updates are functional, so a
-  // re-render never restarts the timer.
   const countdownRunning = cooldown > 0 || expiry > 0;
 
   useEffect(() => {
@@ -62,9 +48,6 @@ export default function ForgotPasswordPage() {
   }, [countdownRunning]);
 
   // Once the OTP countdown runs out the code is dead, so say so rather than
-  // letting the user keep submitting something that will be refused. Guarded
-  // on `expiryEverSet` because zero is also the state before the first
-  // response arrives, where there is nothing to have expired yet.
   const expiryEverSet = useRef(false);
 
   useEffect(() => {
@@ -110,12 +93,7 @@ export default function ForgotPasswordPage() {
     },
   });
 
-  /*
-   * Scoped to the current step, not the union of all three mutations.
-   * React Query keeps a mutation's `error` until it is reset or the next
-   * attempt starts, so a stale failure from the email step would otherwise
-   * keep rendering on the OTP and password steps.
-   */
+   /** Scoped to the current step, not the union of all three mutations. */
   const activeError =
     step === "email"
       ? requestOtp.error
@@ -125,14 +103,7 @@ export default function ForgotPasswordPage() {
 
   const errorCode = useMemo(() => getErrorCode(activeError), [activeError]);
 
-  /**
-   * Maps a machine code to wording that tells the user what to do next.
-   *
-   * `OTP_ATTEMPTS_EXCEEDED` is also what the server returns when there was
-   * never a live code for the address, which is intentional: collapsing the
-   * two cases is what stops this endpoint from confirming which emails are
-   * registered. Both outcomes need the same advice anyway.
-   */
+   /** Maps a machine code to wording that tells the user what to do next. */
   function friendlyError(fallback: string): string {
     switch (errorCode) {
       case "OTP_ATTEMPTS_EXCEEDED":
@@ -288,8 +259,6 @@ export default function ForgotPasswordPage() {
             inputMode="numeric"
             autoComplete="one-time-code"
             // The OTP field is mounted fresh when this step renders, so the
-            // native attribute focuses it at the right moment without the
-            // shared TextInput needing to become a forwardRef component.
             autoFocus
             maxLength={8}
             value={otp}

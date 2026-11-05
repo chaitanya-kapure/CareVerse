@@ -878,3 +878,18 @@ def test_a_doctor_sees_the_same_structured_data_as_the_patient(client, patient, 
 def _first_document_id(client, headers) -> str:
     listing = client.get("/patients/me/documents", headers=headers)
     return listing.json()["items"][0]["id"]
+
+def test_urls_and_phone_numbers_are_never_extracted_as_lab_values():
+    text = "www.epilepsycliniq.com1Forappointmentscall:7904503679\nCall: 9876543210\nVisit http://clinic.example.com"
+    result = extract_structured(text)
+    assert "lab_values" not in result or result["lab_values"] == []
+
+
+def test_tight_prescription_prefix_extracts_medication():
+    text = "Tab.Lobazam\nCap.Omeprazole 20 mg once daily"
+    result = extract_structured(text)
+    meds = result.get("medications", [])
+    names = [m["name"] for m in meds]
+    assert "Lobazam" in names
+    assert "Omeprazole" in names
+

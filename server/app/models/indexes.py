@@ -1,10 +1,4 @@
-"""Index creation, run once on application startup.
-
-These indexes are the second half of authorization: a unique index on
-`patient_profiles.patient_id` is what guarantees a patient cannot end up
-with two profiles, and the compound index on `patient_access` makes the
-"is this doctor authorized?" check a single indexed lookup.
-"""
+"""Index creation, run once on application startup."""
 
 import logging
 
@@ -45,8 +39,6 @@ def ensure_indexes(db: Database) -> None:
     )
 
     # The authorization lookup: "is this doctor allowed to read this patient?"
-    # One indexed read, and the index is unique over live grants so the same
-    # pair cannot be authorized twice.
     _safe(
         db,
         lambda: db[c.PATIENT_ACCESS].create_index(
@@ -79,9 +71,6 @@ def ensure_indexes(db: Database) -> None:
     )
 
     # Password-reset OTPs are the one thing in this schema with a hard
-    # deadline, so MongoDB enforces it. expireAfterSeconds=0 means "delete as
-    # soon as expires_at is in the past", which means the service never has to
-    # run a cleanup job and a forgotten OTP cannot linger on a server.
     _safe(
         db,
         lambda: db[c.PASSWORD_RESET_OTPS].create_index(
@@ -96,8 +85,6 @@ def ensure_indexes(db: Database) -> None:
         ),
     )
     # reset-password resolves the token by hash. Not unique: a spent record
-    # keeps its hash so the replay is auditable, and the query also filters
-    # on consumed_at.
     _safe(
         db,
         lambda: db[c.PASSWORD_RESET_OTPS].create_index(
@@ -144,11 +131,7 @@ def ensure_indexes(db: Database) -> None:
 
 
 def _safe(db: Database, operation) -> None:
-    """Index creation must never stop the API from booting.
-
-    A pre-existing index with different options raises OperationFailure; that
-    is a migration concern, not a reason to take the server down.
-    """
+    """Index creation must never stop the API from booting."""
     try:
         operation()
     except OperationFailure as exc:

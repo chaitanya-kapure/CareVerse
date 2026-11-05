@@ -1,18 +1,4 @@
-"""Summary response schemas.
-
-One shape for both audiences. `GET /patients/me/summary` and
-`GET /doctor/patients/{patientId}/summary` return the same document, because
-a patient reading their own summary and a doctor reading that patient's
-summary are reading the same object; a second, doctor-flavoured schema would
-be an invitation for the two to drift apart.
-
-`SummaryItemResponse` is the enforcement point for traceability at the API
-edge. `source_document_id` is a required field, so a section can never reach
-the client holding a claim that does not say which record it came from -- the
-service has already dropped those, and making the field required here means a
-future change that reintroduces one fails loudly at the boundary instead of
-rendering an unsourced bullet.
-"""
+"""Summary response schemas."""
 
 from datetime import datetime
 from typing import List, Literal, Optional

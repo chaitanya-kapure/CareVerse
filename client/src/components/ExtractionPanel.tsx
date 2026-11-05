@@ -2,15 +2,7 @@ import Alert from "./ui/Alert";
 import { EXTRACTION_NOTICE, OCR_REQUIRED_NOTICE } from "../utils/disclaimers";
 import type { MedicalDocumentDetail } from "../types";
 
-/**
- * Who is looking at the record.
- *
- * The medical-safety wording is identical for both -- it is imported from
- * `utils/disclaimers`, never retyped here. The only thing the audience
- * changes is the sentence that suggests a *next action*, because "upload it
- * again" is meaningful to the person who owns the file and meaningless to a
- * doctor who is only permitted to read it.
- */
+ /** Who is looking at the record. */
 export type RecordAudience = "patient" | "doctor";
 
 interface ExtractionPanelProps {
@@ -18,19 +10,7 @@ interface ExtractionPanelProps {
   audience: RecordAudience;
 }
 
-/**
- * The honest rendering of whatever extraction produced.
- *
- * The non-success states are kept distinct on purpose: a scan we could not
- * read, a file that would not parse, and a document still being processed.
- * Collapsing them into "no text" would tell the reader the report is blank
- * when in fact CAREVERSE never read it.
- *
- * Shared by the patient's record screen and the doctor's, so a given PDF
- * cannot look like one thing to the person who uploaded it and another to the
- * clinician they authorized. The text is always presented as *extracted* --
- * never as a finding.
- */
+ /** The honest rendering of whatever extraction produced. */
 export default function ExtractionPanel({ record, audience }: ExtractionPanelProps) {
   if (record.extraction_status === "completed" && record.extracted_text) {
     return (

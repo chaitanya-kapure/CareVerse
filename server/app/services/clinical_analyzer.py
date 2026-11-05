@@ -29,7 +29,7 @@ def _clean_ocr_anomalies(text: str) -> str:
     s = text
 
     # Common OCR prefix/name misreads: e.g. DeVishu -> Dr. Vishu
-    s = re.sub(r"\bde(?=[A-Z][a-z])", "Dr. ", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bDe(?=[A-Z][a-z])", "Dr. ", s)
     s = re.sub(r"\bdr\s+([A-Z])", r"Dr. \1", s, flags=re.IGNORECASE)
     s = re.sub(r"\boupta\b", "Gupta", s, flags=re.IGNORECASE)
 
@@ -76,7 +76,7 @@ def _detect_facility(lines: list[str]) -> Optional[str]:
     for line in lines[:8]:
         cleaned = _clean_ocr_anomalies(line).strip()
         if re.search(
-            r"\b(?:hospital|clinic|medical\s*centre|medical\s*center|nursing\s*home|laboratory|diagnostic|healthcare)\b",
+            r"\b(?:hospital|clinic|cliniq|medical\s*centre|medical\s*center|nursing\s*home|laboratory|diagnostic|healthcare)\b",
             cleaned,
             re.IGNORECASE,
         ):
@@ -197,7 +197,7 @@ def analyze_document_content(
             low_str = ", ".join(f"{l['name']} ({l['value']} {l.get('unit', '')}) [LOW]" for l in low_labs)
             observations.append(f"Low Test Markers: {low_str}")
         if not high_labs and not low_labs:
-            observations.append("Test Markers Status: All detected test values are within standard normal reference ranges.")
+            observations.append("Test Markers Status: Stated test values recorded without flags.")
 
     if medications:
         med_names = [f"{m['name']}" + (f" ({m['dosage']})" if m.get("dosage") else "") for m in medications]

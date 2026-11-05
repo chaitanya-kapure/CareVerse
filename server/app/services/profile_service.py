@@ -1,14 +1,4 @@
-"""Patient profile read/update.
-
-A profile row is created at registration (`AuthService.ensure_patient_profile`),
-so this service normally just reads it. It re-creates the row if it is somehow
-missing rather than failing the request, because the profile is a fixture of
-having an account -- a patient who reaches this endpoint with no row should
-see an empty form, not a 404.
-
-Scope: plain contact details and the patient's own notes. Nothing in here
-computes, infers or predicts anything about the patient.
-"""
+"""Patient profile read/update."""
 
 import logging
 from datetime import datetime, timezone
@@ -26,8 +16,6 @@ from app.utils import errors
 logger = logging.getLogger(__name__)
 
 # Fields a PATCH is allowed to write. Kept as an explicit set rather than
-# taken from `model_dump()` keys, so a future schema field cannot start
-# writing to Mongo without being added here on purpose.
 EDITABLE_FIELDS = (
     "full_name",
     "date_of_birth",
@@ -90,9 +78,6 @@ class ProfileService:
             )
 
         # `full_name` mirrors `users.name` so the name shown in the topbar
-        # and the name on the profile cannot drift apart. They are one piece
-        # of information to the patient; storing it twice only invites a
-        # mismatch.
         if "full_name" in changes and changes["full_name"]:
             self._users.update_one(
                 {"_id": ObjectId(patient_id)},
@@ -104,11 +89,7 @@ class ProfileService:
     # --- helpers ----------------------------------------------------------
 
     def _create(self, patient_id: str) -> Optional[PatientProfileDocument]:
-        """Insert the profile row if it does not exist yet.
-
-        The caller must be a patient; a doctor reaching this path is refused
-        by the route's role dependency before the service is ever constructed.
-        """
+        """Insert the profile row if it does not exist yet."""
         user = self._users.find_one({"_id": ObjectId(patient_id)})
         if user is None or user.get("role") != "patient":
             logger.warning("profile requested for a non-patient account")
@@ -127,8 +108,6 @@ class ProfileService:
             "updated_at": now,
         }
         # `$setOnInsert` + upsert rather than a plain insert: two concurrent
-        # requests must not create two profiles. The unique index on
-        # patient_id is the real guard; this keeps the race quiet.
         self._profiles.update_one(
             {"patient_id": patient_id},
             {"$setOnInsert": document},

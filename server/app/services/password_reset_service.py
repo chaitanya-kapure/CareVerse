@@ -1,21 +1,4 @@
-"""Password-reset business logic.
-
-The flow is: request an OTP for an address, exchange a correct OTP for a
-single-use reset token, then spend that token changing the password. Each
-step is a separate short-lived credential rather than one long-lived one, so
-an intercepted OTP cannot be replayed as a password change and an
-intercepted reset token cannot be used to log in.
-
-Anti-abuse mechanisms, and what each one is actually for:
-
-  hashed OTP            a leaked database does not reveal a live code
-  10-minute expiry      bounds how long a code stays worth anything
-  single use            `consumed_at` makes replay impossible
-  attempt limit         stops online guessing within the validity window
-  resend cooldown       stops an attacker cycling OTPs to reset repeatedly
-  opaque reset token    short-lived and scoped to one purpose; not a login JWT
-  TTL index             MongoDB deletes expired records unaided
-"""
+"""Password-reset business logic."""
 
 import logging
 from datetime import datetime, timedelta, timezone
@@ -44,13 +27,7 @@ logger = logging.getLogger(__name__)
 
 @lru_cache(maxsize=1)
 def _timing_equalizer() -> str:
-    """A throwaway bcrypt hash to spend when there is nothing to compare.
-
-    `verify_otp` costs a full bcrypt round. Without this, a request for an
-    email with no active OTP would return noticeably faster than one with an
-    active OTP, which is a timing side channel on "does this account exist".
-    Cached so it is paid once per process rather than per request.
-    """
+    """A throwaway bcrypt hash to spend when there is nothing to compare."""
     return hash_otp("timing-equalizer")
 
 
@@ -67,12 +44,7 @@ class PasswordResetService:
     # --- Step 1: request an OTP ------------------------------------------
 
     def request_otp(self, email: str, request_ip: Optional[str] = None) -> dict:
-        """Issue an OTP when the address is registered and off cooldown.
-
-        The return value is for the log and the tests. The HTTP response is
-        built from constants by the controller regardless of what happens in
-        here, so no branch below can change what the client sees.
-        """
+        """Issue an OTP when the address is registered and off cooldown."""
         email = normalize_email(email)
         now = _now()
 
@@ -87,16 +59,10 @@ class PasswordResetService:
 
         if previous is not None and now - previous["created_at"] < cooldown:
             # Silently ignored rather than rejected with a 429: a distinct
-            # status code here would tell an attacker that the address is
-            # registered, because an unregistered address never has a
-            # previous record to be inside a cooldown.
             logger.info("Password reset request inside resend cooldown; not reissued")
             return {"issued": False, "reason": "cooldown"}
 
         # A fresh request supersedes any earlier *unredeemed* code, so only
-        # the most recently issued OTP is ever redeemable. Records that have
-        # already been exchanged for a reset token are left alone: they hold
-        # an in-flight password change that a stray resend must not cancel.
         self._otps.delete_many(
             {"email": email, "consumed_at": None, "reset_token_hash": None}
         )
@@ -134,9 +100,6 @@ class PasswordResetService:
 
         if record is None:
             # Either the address has no code, or the code was already burned
-            # through its attempts. Both collapse to one response so that
-            # stepping through this endpoint cannot be used to discover which
-            # addresses are registered.
             verify_otp(otp, _timing_equalizer())
             raise errors.bad_request(
                 "Too many incorrect attempts, or no code is active. Request a new code.",
@@ -159,8 +122,6 @@ class PasswordResetService:
             remaining = max(record.get("max_attempts", 0) - attempts, 0)
             if remaining <= 0:
                 # Destroy the record rather than leaving it to be probed
-                # again. Consuming it also means the code cannot be used
-                # later by whoever triggered the lockout.
                 self._otps.delete_one({"_id": record["_id"]})
                 logger.info("Password reset OTP locked out after too many attempts")
 
@@ -181,11 +142,6 @@ class PasswordResetService:
                     "reset_token_expires_at": now
                     + timedelta(minutes=settings.reset_token_ttl_minutes),
                     # Clearing the hash is what makes the OTP single-use.
-                    # Without this the record still matched the "active"
-                    # lookup and the same code could be exchanged again and
-                    # again, minting a fresh reset token each time until it
-                    # expired. The document survives holding the reset token,
-                    # so the redemption is still auditable.
                     "otp_hash": None,
                 }
             },
@@ -228,9 +184,6 @@ class PasswordResetService:
             )
 
         # Same hashing path as registration and login. Deliberately not a
-        # new function: a password reset must be indistinguishable from a
-        # normal signup in the stored record, and must not weaken the cost
-        # factor for credentials an attacker might later crack offline.
         self._users.update_one(
             {"_id": user["_id"]},
             {
@@ -264,25 +217,14 @@ class PasswordResetService:
     # --- helpers ----------------------------------------------------------
 
     def _active_record(self, email: str) -> Optional[PasswordResetOtpDocument]:
-        """The record holding a still-redeemable OTP, if there is one.
-
-        Requires a surviving `otp_hash`, which is cleared the moment the OTP
-        is exchanged for a reset token. That is what makes a code
-        single-use: after one successful verification the record no longer
-        matches, so the same digits cannot be submitted again.
-        """
+        """The record holding a still-redeemable OTP, if there is one."""
         return self._otps.find_one(
             {"email": email, "consumed_at": None, "otp_hash": {"$ne": None}},
             sort=[("created_at", -1)],
         )
 
     def _latest_record(self, email: str) -> Optional[PasswordResetOtpDocument]:
-        """The most recent record for an address in any state.
-
-        Used for the resend cooldown, which must keep working after a code
-        has been exchanged -- otherwise a verified user could ask for codes
-        without limit by re-entering the request step.
-        """
+        """The most recent record for an address in any state."""
         return self._otps.find_one({"email": email}, sort=[("created_at", -1)])
 
     @staticmethod

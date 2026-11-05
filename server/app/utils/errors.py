@@ -1,12 +1,4 @@
-"""Shared error helpers and the standard error envelope.
-
-Every failure the API returns looks the same:
-
-    {"detail": "<human readable>", "code": "<MACHINE_CODE>"}
-
-`detail` is kept for backwards compatibility with the existing client, which
-already reads it.
-"""
+"""Shared error helpers and the standard error envelope."""
 
 from typing import Any, Optional
 
@@ -63,9 +55,6 @@ def unprocessable(detail: str, code: str = "UNPROCESSABLE"):
 
 
 # Added for the document upload path. Both are real HTTP semantics rather
-# than a 400 with a nicer message: 413 says "this will never be accepted as
-# sized" and 415 says "no content type of yours will ever be accepted", and
-# the client can branch on `code` without parsing prose.
 
 
 def payload_too_large(detail: str, code: str = "PAYLOAD_TOO_LARGE"):
@@ -85,14 +74,7 @@ def unsupported_media_type(detail: str, code: str = "UNSUPPORTED_MEDIA_TYPE"):
 
 
 def server_error(detail: str, code: str = "INTERNAL_ERROR"):
-    """A 500 that is allowed to say something useful.
-
-    The global unhandled-exception handler answers with a generic sentence,
-    which is the right default for an unexpected crash. A storage failure is
-    *expected* and diagnosed, so it can safely tell the patient what failed
-    and carry a specific `code` -- while still revealing nothing about the
-    server, the path, or the exception type.
-    """
+    """A 500 that is allowed to say something useful."""
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail=detail,
@@ -105,12 +87,7 @@ def internal(detail: str = "Internal server error", code: str = "INTERNAL_ERROR"
 
 
 def flatten_errors(raw_errors: list) -> str:
-    """Collapse Pydantic's error list into one sentence the UI can show.
-
-    Shared by the global `RequestValidationError` handler and by handlers
-    that build a body themselves, so both failure paths read the same to the
-    client. The full detail stays on the server log.
-    """
+    """Collapse Pydantic's error list into one sentence the UI can show."""
     problems: list[str] = []
     for error in raw_errors:
         location = ".".join(str(part) for part in error.get("loc", []) if part != "body")
@@ -120,14 +97,7 @@ def flatten_errors(raw_errors: list) -> str:
 
 
 def from_pydantic(exc: ValidationError) -> HTTPException:
-    """Convert a Pydantic `ValidationError` raised inside a handler into 422.
-
-    FastAPI only translates `ValidationError` into a 422 automatically for
-    parameters it declared itself. A body built by hand inside a handler --
-    the multipart upload fields, for example -- would otherwise surface as an
-    unhandled 500 and show the patient "An unexpected error occurred" for a
-    mistyped date.
-    """
+    """Convert a Pydantic `ValidationError` raised inside a handler into 422."""
     return unprocessable(flatten_errors(exc.errors()), "VALIDATION_ERROR")
 
 

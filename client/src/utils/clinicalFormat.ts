@@ -12,7 +12,8 @@ export type ClinicalResultStatus =
   | "abnormal_low"
   | "critical"
   | "pending"
-  | "unavailable";
+  | "unavailable"
+  | "recorded";
 
 export interface ClinicalStatusDetails {
   status: ClinicalResultStatus;
@@ -255,6 +256,61 @@ const MEDICAL_ACRONYMS = new Set([
  * Format any raw medical test identifier into a complete, human-readable name.
  * Avoids raw database keys, snake_case, and unformatted technical strings.
  */
+
+const NON_LAB_NAME_PATTERNS = /(?:https?:\/\/|www\.|\.(?:com|org|net|in|co|io|gov|info)\b|\b(?:call|phone|tel|mobile|cell|fax|contact|helpline|whatsapp|appointment|appointments|timing|schedule)\b|\b(?:dr\.?|doctor|hospital|clinic|cliniq|centre|center|nursing\s*home|consultant|physician|surgeon)\b|\b(?:invoice|bill|receipt|barcode|token|mrn|uhid|reg(?:istration)?|opd|ipd|gstin|pan|prescription|advice)\b|\b(?:address|street|road|floor|building|block|city|district|pin\s*code|pincode|lane|nagar)\b)/i;
+
+const UNITLESS_ACCEPTED_TESTS = new Set([
+  "ph",
+  "urine ph",
+  "inr",
+  "international normalized ratio",
+  "a/g ratio",
+  "ag ratio",
+  "albumin/globulin ratio",
+  "bun/creatinine ratio",
+  "bun/cr ratio",
+  "specific gravity",
+  "sp gravity",
+  "anion gap",
+  "bmi",
+  "spo2",
+]);
+
+/**
+ * Guard against parsing web URLs, phone numbers, contact info, or barcodes as lab tests.
+ */
+export function isValidLabReading(
+  name?: string | null,
+  value?: string | null,
+  unit?: string | null
+): boolean {
+  if (!name || !name.trim()) return false;
+  const cleanName = name.trim();
+  if (NON_LAB_NAME_PATTERNS.test(cleanName)) return false;
+  if (cleanName.includes("@")) return false;
+
+  if (!value || !value.trim()) return false;
+  const cleanValue = value.trim();
+  const digits = cleanValue.replace(/[^\d]/g, "");
+  // 7-15 digit numbers are phone numbers or barcodes unless explicit cell count
+  if (digits.length >= 7) {
+    const isCount =
+      /platelet|wbc|rbc|cells|count/i.test(cleanName) &&
+      /uL|mcL|cumm|cells/i.test(unit || "");
+    if (!isCount) return false;
+  }
+
+  // Unitless check
+  if (!unit || !unit.trim()) {
+    const lower = cleanName.toLowerCase();
+    if (UNITLESS_ACCEPTED_TESTS.has(lower)) return true;
+    if (/ratio|index|score/i.test(lower)) return true;
+    return false;
+  }
+
+  return true;
+}
+
 export function formatMedicalTestName(rawName?: string | null): string {
   if (!rawName || !rawName.trim()) {
     return "Diagnostic Test";
@@ -399,7 +455,8 @@ export function determineResultStatus(
     return "abnormal_high";
   }
 
-  return "normal";
+  // When no flag was printed and no reference range was provided, do not claim normal
+  return "recorded";
 }
 
 /**
@@ -437,6 +494,14 @@ export function getClinicalStatusDetails(status: ClinicalResultStatus): Clinical
         label: "Pending",
         badgeClass: "bg-purple-50 text-purple-800 border-purple-200 ring-purple-500/20",
         dotClass: "bg-purple-400",
+        tone: "neutral",
+      };
+    case "recorded":
+      return {
+        status: "recorded",
+        label: "Recorded / No Ref Range",
+        badgeClass: "bg-slate-100 text-slate-700 border-slate-200 ring-slate-400/20",
+        dotClass: "bg-slate-400",
         tone: "neutral",
       };
     case "unavailable":

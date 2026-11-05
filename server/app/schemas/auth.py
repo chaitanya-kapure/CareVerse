@@ -1,8 +1,4 @@
-"""Request/response schemas for authentication.
-
-Pydantic is the validation layer here (the Zod equivalent in the original
-spec). Nothing reaches a service without passing through one of these.
-"""
+"""Request/response schemas for authentication."""
 
 from typing import Annotated, Literal, Optional
 
@@ -13,10 +9,6 @@ from app.config import settings
 UserRoleLiteral = Literal["patient", "doctor"]
 
 # One definition of what a valid password is. Registration and password
-# reset share it so the two paths cannot drift apart -- a reset that accepted
-# a password registration would reject would be a confusing lockout bug.
-# 72 is bcrypt's hard byte limit; the schema stops oversized input before
-# hashing rather than silently truncating it later.
 PasswordValue = Annotated[str, Field(min_length=6, max_length=72)]
 
 
@@ -64,11 +56,6 @@ class MessageResponse(BaseModel):
 
 
 # --- Password reset -------------------------------------------------------
-#
-# Three endpoints, three distinct credentials. `retry_after_seconds` is a
-# configuration constant rather than a measurement of this particular
-# request, because a value that changed depending on whether the account
-# exists would defeat the point of the generic response.
 
 
 class ForgotPasswordRequest(BaseModel):

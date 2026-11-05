@@ -1,54 +1,4 @@
-"""Deterministic structured extraction of explicitly stated medical facts.
-
-Scope of this module: take the plain text a PDF already yielded, and pull out
-the facts the document *states outright* into the `ExtractedData` shape the
-model already declares. Nothing else.
-
-    PDF --(extraction_service)--> text --(this module)--> extracted_data
-
-Why this sits between the text and any future summary is the whole point of
-the phase. A summarizer handed 500,000 characters of raw clinical prose has to
-decide what it is looking at; a summarizer handed structured, source-attributed
-facts does not. Everything that can be established deterministically is
-established here first, so nothing that can be checked is left to be guessed.
-
-Three rules are load-bearing, and each of them is a safety property rather than
-a parsing detail:
-
-  * **Nothing is inferred.** Every value here was written on the page. A lab
-    number is never turned into a condition, a medication is never turned into
-    a recommendation, and a sentence about a body part is never promoted to a
-    finding because it contains medical vocabulary.
-
-  * **`flag` is transcribed, never computed.** A laboratory value is marked
-    abnormal *only* when the document itself prints a marker next to it --
-    `H`, `L`, `*`, `(High)`. Comparing a number against a reference range is
-    deliberately NOT done here, even though the range is present in the text,
-    because that comparison is an interpretation and an interpretation is
-    exactly what this layer exists to avoid. It would also be fragile: `<5`,
-    `>180` and `70-99` are not the same shape of claim as `12-16`, and a
-    mistaken "high" would enter a future summary as a clinical fact.
-
-  * **Every fact carries `source_text`.** A future summary must be able to
-    deep-link any claim back to the line it came from. A fact that cannot be
-    attributed to a line is dropped rather than kept "approximately right",
-    because an untraceable claim in a medical record is worse than a missing
-    one.
-
-Determinism is a hard requirement, not a convenience: the same text must
-always produce the same structure, so tests can assert on it and a demo can be
-reproduced. Every pass below walks the text in document order, sorts nothing
-that depends on set iteration, and derives every decision from the text itself.
-
-Bounded by construction. `extracted_text` is already capped at
-`MAX_EXTRACTED_CHARS` by the text extractor, and this module caps it again
-along with the number of lines it will read, the number of facts per category,
-and the length of any single fact. A pathological document therefore cannot
-produce an unbounded structure.
-
-Nothing here logs document content. On failure it logs the exception *type*,
-which is the only thing about a parse error that is safe to write down.
-"""
+"""Deterministic structured extraction of explicitly stated medical facts."""
 
 import logging
 import re
@@ -64,14 +14,8 @@ logger = logging.getLogger(__name__)
 # bounds
 # ======================================================================
 # Every one of these exists so that a hostile or merely enormous document
-# cannot turn this pass into the memory problem the upload limits already
-# guard against. They are constants rather than inline numbers so the
-# trade-off is stated in one place: a truncated pass is an incomplete one,
-# never an unbounded one.
 
 # Mirrors extraction_service.MAX_EXTRACTED_CHARS. The text extractor already
-# enforces it; re-checking here means this module is safe to call on text from
-# any origin, not only from that one caller.
 MAX_INPUT_CHARS = 500_000
 
 # A 500,000-character document is ~20,000 lines. Past this the remainder is
@@ -95,13 +39,9 @@ MAX_METADATA_CHARS = 120
 MAX_TITLE_CHARS = 200
 
 # `source_text` must stay verbatim, so an over-long line is *skipped* rather
-# than truncated -- a clipped quote is not a quote. This is the one bound that
-# costs recall instead of only costing speed.
 MAX_SOURCE_TEXT_CHARS = 300
 
 # How far into the document to look for a labelled header. Metadata lives at
-# the top; scanning all 20,000 lines for "Hospital:" would be wasted work and
-# would find a footer address long after the real header.
 MAX_METADATA_LINES = 60
 
 # Abbreviations that introduce an administration frequency. Only recognised
@@ -118,18 +58,7 @@ FREQUENCY_ABBREVIATIONS = (
 
 
 def extract_structured(text: str) -> ExtractedData:
-    """Pull explicitly stated facts out of extracted document text.
-
-    Pure, deterministic, and exception-safe. Takes text, returns the
-    `ExtractedData` shape -- never raises, never touches the database or the
-    network, and never returns a key it has nothing to say about.
-
-    A field the document does not state is **absent from the result**, not
-    present-and-null. That is the representation the architecture specifies,
-    and it is what lets "not found in the uploaded records" propagate to a
-    future summary instead of a screen having to distinguish "empty" from
-    "absent".
-    """
+    """Pull explicitly stated facts out of extracted document text."""
     if not isinstance(text, str) or not text.strip():
         return {}
 
@@ -138,8 +67,6 @@ def extract_structured(text: str) -> ExtractedData:
         text = text[:MAX_INPUT_CHARS]
 
     # Guarded like every other pass, even though it is the one that touches
-    # the raw string first: the contract that `extract_structured` never raises
-    # has to hold for the whole function, not just for its tail.
     lines = _guard(_readable_lines, text, default=[])
     if not lines:
         return {}
@@ -147,9 +74,6 @@ def extract_structured(text: str) -> ExtractedData:
     result: ExtractedData = {}
 
     # Medications first: a prescription line ("Metformin 500 mg twice daily")
-    # also looks like a lab row to a value-shaped pattern, and it must not be
-    # counted as a measurement. Parsing them in this order lets the lab pass
-    # skip the lines that are really prescriptions.
     medications, medication_lines = _guard(
         _extract_medications, lines, default=([], set())
     )
@@ -183,13 +107,7 @@ def extract_structured(text: str) -> ExtractedData:
 
 
 def _guard(fn: Callable, *args, default: Any = None) -> Any:
-    """Run one extraction pass, degrading to `default` if it raises.
-
-    One category failing must not discard the categories that already
-    succeeded, and must never propagate -- an exception here would turn a
-    successfully extracted document into a failed upload, which is precisely
-    the coupling the pipeline is written to avoid.
-    """
+    """Run one extraction pass, degrading to `default` if it raises."""
     try:
         return fn(*args)
     except Exception as exc:
@@ -202,13 +120,7 @@ def _guard(fn: Callable, *args, default: Any = None) -> Any:
 
 
 def _readable_lines(text: str) -> list[str]:
-    """Split into non-empty, whitespace-trimmed lines, up to `MAX_LINES`.
-
-    Trimming the ends of a line does not change what it says, and it keeps
-    every `source_text` a clean quote of the line it came from. Interior
-    spacing is left exactly as extracted -- reflowing a record would be
-    editing it.
-    """
+    """Split into non-empty, whitespace-trimmed lines, up to `MAX_LINES`."""
     lines: list[str] = []
     for raw in text.split("\n"):
         line = raw.strip()
@@ -231,13 +143,7 @@ def _quotable(line: str) -> bool:
 
 
 def _dedupe(items: list[dict], keys: tuple[str, ...], limit: int) -> list[dict]:
-    """First occurrence wins, in document order, capped at `limit`.
-
-    Real records repeat themselves -- the same test printed in a header table
-    and again in the body -- and a summary that lists a value three times
-    because the PDF said it three times is noise. Order is preserved because
-    the input is ordered; no set is ever iterated to build the result.
-    """
+    """First occurrence wins, in document order, capped at `limit`."""
     seen: set[tuple] = set()
     unique: list[dict] = []
     for item in items:
@@ -255,10 +161,6 @@ def _dedupe(items: list[dict], keys: tuple[str, ...], limit: int) -> list[dict]:
 # metadata: report title, date, facility, referring doctor
 # ======================================================================
 # All four require an explicit printed label. There is no heading heuristic
-# and no positional guess: "the first line" is where a letterhead lives on a
-# letterhead and where a patient's name lives on a discharge summary, and
-# guessing between those two is exactly the kind of inference this layer must
-# not do. A field with no label is left absent.
 
 _LABELL_VALUE = re.compile(
     r"^(?P<label>[A-Za-z][A-Za-z0-9 /\-]{0,40}?)\s*[:\-]\s*(?P<value>\S.*)$"
@@ -277,7 +179,7 @@ REPORT_TITLE_LABELS = {
 }
 
 FACILITY_LABELS = {
-    "hospital", "hospital name", "clinic", "clinic name", "laboratory",
+    "hospital", "hospital name", "clinic", "cliniq", "clinic name", "laboratory",
     "lab", "centre", "center", "facility", "facility name", "institution",
     "department", "issued by", "performed at", "organisation", "organization",
 }
@@ -327,8 +229,6 @@ def _extract_referring_doctor(lines: list[str]) -> Optional[str]:
 
 
 # An address is never promoted to a facility, and a name is never promoted to
-# a doctor, because neither is a labelled field. Both are reachable only
-# through `_labelled_value`.
 
 
 # ======================================================================
@@ -354,24 +254,7 @@ _BIRTH_CONTEXT = re.compile(
 
 
 def _extract_document_date(lines: list[str]) -> Optional[str]:
-    """The first date the document labels as its own.
-
-    Precedence is deliberate. A `document_date` the patient typed at upload is
-    the document's date of record and lives on the document row; this field is
-    a *separate* reading of what the file says, and it never overwrites it.
-    Which one a screen shows is a display decision; both are recorded.
-
-    Two ambiguity rules, both of which choose "no answer" over "wrong answer":
-
-      * Only `YYYY-MM-DD` / `YYYY/MM/DD` is always accepted, because the
-        four-digit year in front removes the day/month ordering question.
-      * `DD/MM/YYYY` is accepted **only** when the leading number is above 12,
-        which proves it is a day and not a month. `03/04/2025` is refused
-        outright rather than resolved to one of two readings.
-
-    Every candidate is then checked against the real calendar, so `2026-02-30`
-    is rejected rather than normalised into a different day.
-    """
+    """The first date the document labels as its own."""
     for line in lines[:MAX_METADATA_LINES]:
         if not _quotable(line):
             continue
@@ -379,12 +262,6 @@ def _extract_document_date(lines: list[str]) -> Optional[str]:
             continue
 
         # A line that is nothing but a date is a report-date heading.
-        # A line that is *nothing but* a date is a report-date heading, and
-        # needs no label. A line that merely *contains* one does need a label
-        # in front of it: "Next appointment 2025-11-02" prints a date, but the
-        # date is the appointment's, not the document's, and accepting it
-        # because a date happened to appear in the text would be exactly the
-        # guessing this module must not do.
         candidates: list[str] = []
         if _line_is_only_a_date(line):
             candidates.append(line)
@@ -402,11 +279,7 @@ def _extract_document_date(lines: list[str]) -> Optional[str]:
 
 
 def _line_is_only_a_date(line: str) -> bool:
-    """True when a line consists of a date and nothing else.
-
-    Anchored at both ends, so `2025-11-02 (repeat)` and `Next appointment
-    2025-11-02` both fail -- they print something else as well.
-    """
+    """True when a line consists of a date and nothing else."""
     for pattern in (_ISO_DATE, _SLASH_DATE):
         if pattern.fullmatch(line):
             return True
@@ -423,13 +296,7 @@ def _find_dates(line: str) -> list[re.Match]:
 
 
 def _parse_iso_date(raw: str) -> Optional[str]:
-    """Turn a date the document printed into `YYYY-MM-DD`, or refuse it.
-
-    The ambiguity rule is enforced here as well as at the call site, because
-    this is the function that actually commits a day and a month to a value --
-    and a date that reaches a summary as a confident ISO string cannot be
-    walked back afterwards.
-    """
+    """Turn a date the document printed into `YYYY-MM-DD`, or refuse it."""
     iso = _ISO_DATE.search(raw)
     if iso:
         year, month, day = int(iso.group("year")), int(iso.group("month")), int(iso.group("day"))
@@ -457,8 +324,6 @@ def _parse_iso_date(raw: str) -> Optional[str]:
 # ======================================================================
 
 # name, separator, value, optional unit. The name is non-greedy and the
-# separator is required, so "Glucose 126 mg/dL" splits at the first point that
-# leaves a number in the right place and the rest of the line accounted for.
 _LAB_LINE = re.compile(
     r"^(?P<name>[A-Za-z][A-Za-z0-9 ()'/%+.\-]{0,59}?)[:\s]+"
     r"(?P<value>[<>≤≥]?\s*-?\d+(?:\.\d+)?)\s*"
@@ -520,6 +385,22 @@ _MARKER_FLAGS = {
 }
 
 # Names that are demographics or paperwork, not tests.
+_NON_LAB_PATTERNS = re.compile(
+    r"(?:https?://|www\.|\.(?:com|org|net|in|co|io|gov|info|edu)\b"
+    r"|\b(?:call|phone|tel|mobile|cell|fax|contact|helpline|whatsapp|appointment|appointments|timing|schedule)\b"
+    r"|\b(?:dr\.?|doctor|hospital|clinic|cliniq|centre|center|nursing\s*home|consultant|physician|surgeon|pathologist|radiologist|specialist)\b"
+    r"|\b(?:invoice|bill|receipt|barcode|token|mrn|uhid|reg(?:istration)?(?:\s*no)?|opd|ipd|gstin|pan|prescription|advice)\b"
+    r"|\b(?:address|street|road|floor|building|block|city|district|pin\s*code|pincode|lane|nagar)\b)",
+    re.IGNORECASE,
+)
+
+_UNITLESS_ACCEPTED_TESTS = {
+    "ph", "urine ph", "inr", "international normalized ratio",
+    "a/g ratio", "ag ratio", "albumin/globulin ratio",
+    "bun/creatinine ratio", "bun/cr ratio", "specific gravity",
+    "sp gravity", "anion gap", "bmi", "spo2",
+}
+
 _LAB_NAME_STOPWORDS = {
     "age", "sex", "gender", "dob", "d o b", "date", "born", "birth",
     "page", "page no", "pages", "phone", "tel", "telephone", "id",
@@ -527,6 +408,11 @@ _LAB_NAME_STOPWORDS = {
     "hospital no", "unit no", "bed", "ward", "doctor", "dr", "name",
     "patient", "patient name", "address", "email", "fax", "time",
     "total pages", "report", "result", "results", "test", "tests",
+    "call", "appointment", "appointments", "clinic", "cliniq", "hospital",
+    "consultant", "physician", "surgeon", "barcode", "token", "bill",
+    "invoice", "receipt", "pin", "pincode", "road", "street", "nagar",
+    "floor", "reg", "registration", "gstin", "website", "web", "online",
+    "helpline", "whatsapp", "timing", "schedule",
 }
 
 # A name containing a copula or a perception verb is a sentence, not a label.
@@ -537,9 +423,6 @@ _LAB_NAME_VERBISH = re.compile(
 )
 
 # Demographics that appear on more laboratory reports than they should, and
-# which must never be recorded as an observation about the patient. The
-# "tail must be fully accounted for" rule already rejects most of these; this
-# catches the ones where the numbers happen to line up.
 _LAB_NAME_FORBIDDEN = re.compile(
     r"\b(?:date\s+of\s+birth|birth\s*date|d\.?\s?o\.?\s?b\.?|born|age\s+of)\b",
     re.IGNORECASE,
@@ -553,8 +436,6 @@ def _extract_lab_values(
     for index, line in enumerate(lines):
         if index in medication_lines:
             # "Metformin 500 mg twice daily" is a prescription, not a
-            # measurement of the patient. Letting the value pattern claim it
-            # would report a dose as though it were an observed lab result.
             continue
         if not _quotable(line):
             continue
@@ -566,16 +447,7 @@ def _extract_lab_values(
 
 
 def _parse_lab_line(line: str) -> Optional[dict]:
-    """One laboratory row, or `None` if this line is not one.
-
-    The line is read at most twice: once with a trailing explicit marker
-    removed, and once without. Trying the marker reading first matters for
-    two reasons. "Glucose 126 mg/dL H" only has a value once the `H` is set
-    aside, and "CRP: Negative" carries its *result* in the same position --
-    so each reading is attempted independently and the whole line is always
-    kept as a fallback. The range is popped from whichever reading is used,
-    which is why "8.2 g/dL (12-16) L" still finds both.
-    """
+    """One laboratory row, or `None` if this line is not one."""
     for text, flag in _lab_candidates(line):
         trimmed, reference_range = _pop_trailing_range(text)
         entry = _interpret_lab_text(trimmed, line, reference_range, flag)
@@ -597,20 +469,12 @@ def _lab_candidates(line: str) -> list[tuple[str, Optional[str]]]:
             candidates.append((stripped, flag))
 
     # The whole line, unflagged. Always last, and always present: a token that
-    # looks like a marker but turns out to be the result is only understood
-    # this way.
     candidates.append((line, None))
     return candidates
 
 
 def _token_is_unit(line: str, token: str) -> bool:
-    """True when the trailing token is better read as the line's unit.
-
-    "Urine volume 2 L" is a volume of two litres; "Systolic 140 high" is a
-    reading the document has already called high. One or two characters are
-    plausible units, so a short token that completes the row as its unit wins;
-    a longer word is a marker the document printed after the value.
-    """
+    """True when the trailing token is better read as the line's unit."""
     match = _LAB_LINE.match(line)
     if not match:
         return False
@@ -621,12 +485,7 @@ def _token_is_unit(line: str, token: str) -> bool:
 
 
 def _pop_trailing_range(text: str) -> tuple[str, Optional[str]]:
-    """Remove a printed reference range from the end of a lab row.
-
-    Returns the remaining text and the range with whitespace and dash glyphs
-    normalised, so the same printed range always yields the same stored
-    string. The numbers themselves are never reformatted.
-    """
+    """Remove a printed reference range from the end of a lab row."""
     bracketed = _TRAILING_RANGE.search(text)
     if bracketed:
         return (
@@ -647,14 +506,7 @@ def _pop_trailing_range(text: str) -> tuple[str, Optional[str]]:
 def _interpret_lab_text(
     text: str, source_text: str, reference_range: Optional[str], flag: Optional[str]
 ) -> Optional[dict]:
-    """Read one already-trimmed fragment as a laboratory row.
-
-    The rule that keeps this honest: the tail must be *fully accounted for*.
-    A number followed by something that is not a unit means the fragment is
-    not a lab row -- so it is refused rather than parsed with the fragment
-    dropped. That is what stops "Date of birth: 1988-03-14" from becoming a
-    measurement of 1988 with the rest quietly discarded.
-    """
+    """Read one already-trimmed fragment as a laboratory row."""
     match = _LAB_LINE.match(text)
     if match:
         name = (match.group("name") or "").strip()
@@ -663,7 +515,7 @@ def _interpret_lab_text(
 
         if unit and not _UNIT_SHAPE.match(unit):
             return None
-        if not value or len(value) > MAX_VALUE_CHARS:
+        if not _usable_lab_value(value, unit or None, name, reference_range, flag):
             return None
         if not _usable_lab_name(name):
             return None
@@ -717,20 +569,61 @@ def _usable_lab_name(name: str) -> bool:
         return False
     if len(name.split()) > MAX_NAME_WORDS:
         return False
-    if name.lower() in _LAB_NAME_STOPWORDS:
+    clean = name.strip()
+    clean_lower = clean.lower()
+    if clean_lower in _LAB_NAME_STOPWORDS:
         return False
-    # The *first* word is what identifies the test. A row whose name opens with
-    # "Page", "Age" or "Date" is describing the form, not the patient, and the
-    # words after it ("2 of", "of birth") must not rescue it: "Page 2 of 5"
-    # otherwise parses as a measurement of 5 called "Page 2 of".
-    if name.split()[0].lower() in _LAB_NAME_STOPWORDS:
+    first_word = clean_lower.split()[0]
+    if first_word in _LAB_NAME_STOPWORDS:
         return False
-    if _LAB_NAME_FORBIDDEN.search(name):
+    if _LAB_NAME_FORBIDDEN.search(clean):
         return False
-    if _LAB_NAME_VERBISH.search(name):
+    if _LAB_NAME_VERBISH.search(clean):
         return False
-    if not re.search(r"[A-Za-z]", name):
+    if _NON_LAB_PATTERNS.search(clean):
         return False
+    if "@" in clean or re.search(r"[a-z0-9]+\.(?:com|org|net|in|co|io)\b", clean, re.I):
+        return False
+    if not re.search(r"[A-Za-z]", clean):
+        return False
+    return True
+
+
+def _usable_lab_value(
+    value: str,
+    unit: Optional[str],
+    name: str,
+    reference_range: Optional[str] = None,
+    flag: Optional[str] = None,
+) -> bool:
+    if not value or len(value) > MAX_VALUE_CHARS:
+        return False
+
+    digits = re.sub(r"[^\d]", "", value)
+    if len(digits) >= 7:
+        is_cell_count = any(k in name.lower() for k in ("platelet", "wbc", "rbc", "cells", "count")) and bool(
+            unit and re.search(r"(?:/uL|/mcL|/cumm|cells|10\^|x10)", unit, re.IGNORECASE)
+        )
+        if not is_cell_count:
+            return False
+
+    try:
+        num = float(re.sub(r"[^\d.]", "", value))
+        if num >= 1000000 and not any(k in name.lower() for k in ("platelet", "wbc", "rbc", "viral")):
+            return False
+    except ValueError:
+        pass
+
+    if not unit:
+        if reference_range or flag:
+            return True
+        name_lower = name.lower()
+        if name_lower in _UNITLESS_ACCEPTED_TESTS:
+            return True
+        if any(term in name_lower for term in ("ratio", "index", "score", "inr", "ph")):
+            return True
+        return False
+
     return True
 
 
@@ -743,12 +636,7 @@ def _lab_entry(
     flag: Optional[str],
     source_text: str,
 ) -> dict:
-    """One `lab_values` entry, in the shape the model declares.
-
-    `reference_range` and `flag` are transcribed, never derived. `flag` is
-    absent -- not `None` -- when the document printed no marker, because there
-    is no finding to report rather than a finding of "nothing".
-    """
+    """One `lab_values` entry, in the shape the model declares."""
     entry: dict[str, Any] = {"name": name, "value": value}
     if unit:
         entry["unit"] = unit[:MAX_UNIT_CHARS]
@@ -761,13 +649,7 @@ def _lab_entry(
 
 
 def _normalise_range(raw: str) -> str:
-    """`12.0 - 15.0` -> `12.0-15.0`.
-
-    Whitespace and the dash glyph are unified so the same printed range always
-    yields the same stored string. The numbers themselves are untouched --
-    rounding or reformatting a reference range would alter what the document
-    said the normal values are.
-    """
+    """`12.0 - 15.0` -> `12.0-15.0`."""
     collapsed = re.sub(r"\s*[-–—]\s*", "-", raw.strip())
     collapsed = re.sub(r"\s+", "", collapsed)
     return collapsed[:MAX_VALUE_CHARS]
@@ -777,8 +659,6 @@ def _normalise_range(raw: str) -> str:
 # medications
 # ======================================================================
 # Only what the document states. No drug knowledge is consulted: this module
-# cannot recognise a medication it does not see named, and it makes no
-# judgement about whether a named one is appropriate, current, or interacting.
 
 _MEDICATION_PREFIX = re.compile(
     r"""^\s*
@@ -787,7 +667,7 @@ _MEDICATION_PREFIX = re.compile(
          continued|continuing|apply|applied|inject|injected|give|given|
          prescribe|prescribed|add|added|oral|orally|topical|daily|bd|od)\s+)*
     (?:(?:tab|tabs|tablet|tablets|cap|capsule|capsules|syp|syrup|inj|injection|
-         drops|oint|ointment|cream|lotion|susp|suspension|patch|suppository)\.?\s+)*
+         drops|oint|ointment|cream|lotion|susp|suspension|patch|suppository)\.?\s*)*
     """,
     re.VERBOSE | re.IGNORECASE,
 )
@@ -837,11 +717,7 @@ _MEDICATION_NAME_STOPWORDS = {
 
 
 def _extract_medications(lines: list[str]) -> tuple[list[dict], set[int]]:
-    """Medications the document names, plus the line numbers they claimed.
-
-    Returns the line indexes as well because a prescription line must not also
-    be counted as a laboratory measurement -- see `_extract_lab_values`.
-    """
+    """Medications the document names, plus the line numbers they claimed."""
     entries: list[dict] = []
     claimed: set[int] = set()
 
@@ -864,9 +740,6 @@ def _parse_medication_line(line: str) -> Optional[dict]:
     frequency_match = _MEDICATION_FREQUENCY.search(remainder)
 
     # The name is whatever precedes the dose and the frequency. Reading it as
-    # an open-ended run of words instead would make "Metformin twice daily" a
-    # medication *called* "Metformin twice daily" -- the frequency absorbed
-    # into the name, and the record's own phrasing lost.
     name_end = min(
         [m.start() for m in (dose_match, frequency_match) if m] or [len(remainder)]
     )
@@ -878,15 +751,8 @@ def _parse_medication_line(line: str) -> Optional[dict]:
         return None
 
     # A line qualifies only if the document gave it at least one of the three
-    # signals that this is a prescription. Without any of them, any capitalised
-    # word would become a medication -- "Take paracetamol" as advice prose, the
-    # first word of a heading, a facility name in a sentence.
     if not (prefix and prefix.group(0).strip()) and not frequency_match:
         # A dose on its own is not enough. "Glucose 126 mg/dL" has one, and
-        # without this check every laboratory row in the document would also be
-        # recorded as a prescription of itself. A line qualifies only when the
-        # document also says *how or in what form* the thing is given, which
-        # is exactly what a prescription line has and a lab row does not.
         return None
 
     dosage: Optional[str] = None
@@ -899,8 +765,6 @@ def _parse_medication_line(line: str) -> Optional[dict]:
     frequency: Optional[str] = None
     if frequency_match:
         # The frequency exactly as printed. "BD" stays "BD": expanding an
-        # abbreviation into words would be adding information the document
-        # did not give.
         frequency = re.sub(r"\s+", " ", frequency_match.group(0)).strip()
 
     entry: dict[str, Any] = {"name": name[:MAX_NAME_CHARS]}
@@ -916,15 +780,6 @@ def _parse_medication_line(line: str) -> Optional[dict]:
 # abnormal findings
 # ======================================================================
 # Two mechanisms, both requiring the document to say so:
-#
-#   1. A sentence containing an explicit abnormal marker.
-#   2. A sentence sitting under a heading that labels it as a finding.
-#
-# There is deliberately no third. "Chest X-ray shows consolidation" in
-# arbitrary prose is not captured, because deciding that consolidation is
-# abnormal is a clinical judgement this layer is not allowed to make. Printed
-# under "Findings:", where the document has already made that judgement, it
-# is captured as a quote.
 
 # Markers that mean the same thing wherever they appear in a sentence.
 _UNAMBIGUOUS_MARKERS = (
@@ -934,13 +789,8 @@ _UNAMBIGUOUS_MARKERS = (
 )
 
 # "negative" is excluded on purpose. In a lab or a radiology report it is
-# overwhelmingly a statement of normality -- "no focal consolidation, all
-# negative" -- and treating it as abnormal would invert the document's meaning.
-# As a *result value* it is still recorded, in `lab_values`.
 
 # "high" and "low" need more than a bare word match, because "low back pain"
-# and "high density lesion" are not abnormal-result statements. They count when
-# they read as a description of a measurement.
 _DIRECTIONAL_MARKER = re.compile(
     r"(?:\b(?:is|are|was|were|appears?|appeared|seems?|seemed|remains?|remained|"
     r"found|showing|shows)\s+(?:markedly\s+|significantly\s+|mildly\s+|"
@@ -973,15 +823,7 @@ _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
 
 def _heading_pattern(labels: set[str]) -> re.Pattern:
-    """An exact match for a known section heading on a line of its own.
-
-    The labels are closed sets, so the alternation is built from them and
-    sorted longest-first at import. That matters more than it looks: a generic
-    `^[A-Za-z0-9 ]{1,40}$` heading pattern also matches "Type 2 Diabetes
-    Mellitus", and treating *that* as a heading silently discards the one line
-    of the section anyone wanted to read. Only a label this module already
-    knows can open a section.
-    """
+    """An exact match for a known section heading on a line of its own."""
     alternation = "|".join(
         re.escape(label)
         for label in sorted(labels, key=lambda label: (-len(label), label))
@@ -994,11 +836,6 @@ def _heading_pattern(labels: set[str]) -> re.Pattern:
 _FINDINGS_HEADING = _heading_pattern(FINDINGS_SECTION_LABELS)
 
 # "Impression: No acute abnormality." -- the label and its content share a
-# line. Kept separate from `_FINDINGS_HEADING`, which is only a heading.
-#
-# The separator is a colon and the label may not contain a hyphen, because a
-# hyphen is a word character here: "Chest X-ray shows consolidation" must not
-# split into the label "Chest X-" and the body "ray shows consolidation".
 _INLINE_SECTION = re.compile(
     r"^(?P<label>[A-Za-z][A-Za-z0-9 /&]{0,40}?)\s*:\s*(?P<body>\S.*)$"
 )
@@ -1019,16 +856,9 @@ def _extract_abnormal_findings(lines: list[str]) -> list[dict]:
 
         if _ANY_HEADING.match(line):
             # Some other section's heading: this findings section has ended.
-            # Without this, a document that opens "Findings:" near the top would
-            # keep every following line -- prescriptions, history, footer --
-            # classified as findings.
             in_findings_section = False
 
         # A label with its content on the same line -- "Impression: ..." --
-        # states the finding just as explicitly as the two-line form. Only a
-        # recognised findings label splits the line; anything else keeps its
-        # full text, so "ECG: Abnormal." is quoted whole rather than as a bare
-        # "Abnormal." with the subject missing.
         inline = _INLINE_SECTION.match(line)
         inline_findings = False
         body = line
@@ -1042,8 +872,6 @@ def _extract_abnormal_findings(lines: list[str]) -> list[dict]:
         for sentence in _sentences(body):
             if _NORMALITY_STATEMENT.search(sentence):
                 # The document said this part is normal. Recording it as an
-                # abnormal finding would be a false claim in the other
-                # direction, which is just as wrong.
                 continue
             marker = _abnormal_marker(sentence)
             if marker:
@@ -1082,9 +910,6 @@ def _abnormal_marker(sentence: str) -> Optional[str]:
 
 
 # Explicit statements of normality. A sentence the document itself marks as
-# normal is not recorded as an abnormal finding, including when it sits under
-# a `Findings:` heading -- "Impression: No acute abnormality detected." is a
-# real report, and recording it as an abnormality would invert it.
 _NORMALITY_STATEMENT = re.compile(
     r"\b(?:unremarkable|within\s+normal\s+limits?|normal\s+(?:study|chest|examination|"
     r"findings?|appearance)|no\s+(?:acute|significant|abnormal\w*|evidence\s+of|"
@@ -1097,9 +922,6 @@ _NORMALITY_STATEMENT = re.compile(
 # stated conditions
 # ======================================================================
 # A condition is recorded only where the document states one. There is no
-# path from a lab value, a medication, or a finding to a condition name: the
-# patterns all require an explicit statement phrase, so "Glucose: 126 mg/dL"
-# cannot produce "diabetes" no matter what else is on the page.
 
 _CONDITION_PATTERNS = (
     re.compile(
@@ -1136,16 +958,6 @@ _CONDITION_SECTION_LABELS = {
 _CONDITION_HEADING = _heading_pattern(_CONDITION_SECTION_LABELS)
 
 # Any recognised heading. A findings section has to end when some *other*
-# heading begins -- otherwise "Findings: …" would swallow the entire rest of a
-# document, including the prescriptions and history printed after it.
-# Headings that *close* a section. A closed set, so an unrecognised layout still
-# reads as continuous rather than being silently truncated -- the safer error,
-# because a captured line is quoted verbatim and labelled with where it came
-# from, while a dropped one is simply gone.
-#
-# These are the document-structure headings that follow a findings or history
-# block in practice. "Medications:" is the one that matters: without it, a
-# prescription line printed after a findings block would be filed as a finding.
 _SECTION_BOUNDARY_LABELS = {
     "medications", "medication", "drugs", "drug", "prescriptions",
     "prescription", "treatment", "plan", "advice", "recommendations",
@@ -1162,8 +974,6 @@ _ANY_HEADING = _heading_pattern(
 )
 
 # A line that denies having the thing it goes on to mention. "No known chronic
-# conditions" is a statement about the absence of conditions, and recording
-# "chronic conditions" from it would invert the document's meaning.
 _CONDITION_NEGATION = re.compile(
     r"\b(?:no|not|never|denies|deny|without|nil|none)\s+(?:\w+\s+){0,3}?"
     r"(?:known|significant|history|diagnosed|conditions?|problems?|illness|"
@@ -1190,19 +1000,11 @@ def _extract_stated_conditions(lines: list[str]) -> list[dict]:
             continue
 
         # "No known chronic conditions" states the absence of a condition. The
-        # statement patterns below would happily capture the words after
-        # "known", so the negation is checked first and the whole line skipped.
         if _CONDITION_NEGATION.search(line):
             continue
 
         if _CONDITION_HEADING.match(line):
             # The heading is a label, not a condition. "Medical history:" opens
-            # a section, and reading the label itself as its first entry would
-            # record the word "history" as though the patient had it.
-            #
-            # A line that carries both is not a heading and falls through
-            # normally: "Diagnosis: asthma" has content after the colon, so the
-            # heading pattern never matches it and it is read as a statement.
             in_condition_section = True
             continue
 

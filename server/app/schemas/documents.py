@@ -1,10 +1,4 @@
-"""Upload request and document response schemas.
-
-The upload itself is `multipart/form-data`, so its inputs are declared with
-`Form(...)` in the route rather than as one Pydantic body. What lives here
-are the responses -- the shape the client reads -- plus validation for the
-small set of form fields that travel alongside the file.
-"""
+"""Upload request and document response schemas."""
 
 from datetime import date
 from datetime import datetime
@@ -28,12 +22,7 @@ def _check_iso_date(value: str, field: str) -> str:
 
 
 class MedicalDocumentSummaryResponse(BaseModel):
-    """Metadata only.
-
-    `extracted_text` is deliberately absent from lists: it is large enough
-    that resending it for every row would dominate the response, so it is
-    opt-in on the detail endpoint.
-    """
+    """Metadata only."""
 
     id: str
     document_code: Optional[str] = None
@@ -65,11 +54,7 @@ class DocumentListResponse(BaseModel):
 
 
 class UploadMeta(BaseModel):
-    """Validated form fields that arrive next to the file.
-
-    Separate from the request body because FastAPI parses a multipart
-    request field-by-field rather than as one JSON object.
-    """
+    """Validated form fields that arrive next to the file."""
 
     model_config = ConfigDict(str_strip_whitespace=True)
 

@@ -20,25 +20,7 @@ import {
   NOT_A_DIAGNOSIS_READER_NOTICE,
 } from "../../utils/disclaimers";
 
-/**
- * One authorized patient's summary.
- *
- * Rendered in a fixed order, and the order is the safety model: the disclaimer
- * and the mock label come before anything the summary says, so a reader cannot
- * reach a claim without having first been told what produced it and that it is
- * not a clinical judgment.
- *
- * Two separate sources of truth are on this screen and they must not be
- * confused. The summary says what CAREVERSE extracted; the record list beside
- * it is what the patient actually uploaded. When they disagree — and on a
- * scanned document they always do, because that document is counted as
- * unreadable — the record list is the truth and the summary says so itself.
- *
- * The `patientId` in the URL is attacker-controlled as far as the browser is
- * concerned and is passed straight through. That is safe only because the
- * server authorizes it on every request; an ungranted and a nonexistent
- * patient produce the same `403`, and this screen must not imply which.
- */
+ /** One authorized patient's summary. */
 export default function PatientSummaryPage() {
   const { patientId = "" } = useParams();
   const queryClient = useQueryClient();
@@ -65,8 +47,6 @@ export default function PatientSummaryPage() {
     mutationFn: () => summaryService.regenerate(patientId),
     onSuccess: (fresh) => {
       // Written straight into the cache rather than left to an invalidation
-      // round trip, so the screen shows the summary it just asked for instead
-      // of briefly rendering the old one it asked to replace.
       queryClient.setQueryData(summaryKey, fresh);
     },
   });
@@ -74,9 +54,6 @@ export default function PatientSummaryPage() {
   const backToPatient = `/doctor/patients/${patientId}`;
 
   // `isPending`, not `isLoading`: a first render is pending-but-idle, and an
-  // `isLoading` guard falls through to the success path and renders a summary
-  // full of "not found in the uploaded records" for a patient who has simply
-  // not loaded yet. Same reasoning as the other doctor screens.
   if (summary.isError || records.isError) {
     const forbidden =
       getErrorCode(summary.error) === "NO_PATIENT_ACCESS" ||

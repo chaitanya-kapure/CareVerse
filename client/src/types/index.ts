@@ -1,9 +1,4 @@
-/**
- * Shared API types.
- *
- * These mirror the Pydantic schemas in `server/app/schemas/`. When a
- * response shape changes, both sides change together.
- */
+ /** Shared API types. */
 
 export type UserRole = "patient" | "doctor";
 
@@ -33,9 +28,6 @@ export interface AuthResponse {
 }
 
 // --- Password reset -------------------------------------------------------
-// Three requests and three responses, one per step. The `reset_token` is
-// opaque and single-use: it is not a session and grants nothing but one
-// password change.
 
 export interface ForgotPasswordPayload {
   email: string;
@@ -80,8 +72,6 @@ export interface ApiErrorBody {
 }
 
 // --- Phase 2: patient profile + documents -------------------------------
-// Declared now so the API service has a stable target; the endpoints
-// arrive with the Phase 2 backend.
 
 export interface PatientProfile {
   id: string;
@@ -127,11 +117,7 @@ export interface MedicalDocumentDetail extends MedicalDocumentSummary {
   extracted_data: Record<string, unknown>;
 }
 
-/**
- * PATCH body for the profile. Every field is optional and `null` means
- * "clear this" -- omitting a field leaves it untouched, which is why there
- * is no `Partial<>` variant that would make omission and clearing identical.
- */
+ /** PATCH body for the profile. Every field is optional and `null` means */
 export interface PatientProfileUpdate {
   full_name?: string | null;
   date_of_birth?: string | null;
@@ -147,12 +133,7 @@ export interface DocumentListResponse {
   total: number;
 }
 
-/**
- * Fields the upload form collects alongside the file.
- *
- * All optional: a patient who just wants their report filed can drop the PDF
- * in and go. The server derives a title from the filename when it is empty.
- */
+ /** Fields the upload form collects alongside the file. */
 export interface DocumentUploadForm {
   file: File;
   title?: string;
@@ -161,9 +142,6 @@ export interface DocumentUploadForm {
 }
 
 // --- Phase 3: doctor access ---------------------------------------------
-//
-// One row in `patient_access`, as the patient who created it sees it. The
-// doctor side of the same relationship is `DoctorPatientSummary` below.
 
 export type AccessStatus = "active" | "revoked";
 
@@ -188,14 +166,7 @@ export interface AccessGrantRequest {
   note?: string;
 }
 
-/**
- * One row in the doctor's list of patients they may read.
- *
- * The doctor never receives a grant id, a note, or anything about the
- * relationship's history -- only the patient themselves and what they would
- * already see in their own profile. `document_count` is a count of stored
- * files, not a clinical measure.
- */
+ /** One row in the doctor's list of patients they may read. */
 export interface DoctorPatientSummary {
   patient_id: string;
   careverse_id?: string | null;
@@ -212,10 +183,6 @@ export interface DoctorPatientListResponse {
 }
 
 // --- Phase 4B: the patient summary ---------------------------------------
-// Matches the `patient_summaries` document one-for-one. `SummaryItem` is an
-// object and not a bare string on purpose: `source_document_id` is what makes
-// a claim checkable, and a type that allowed an unattributed string would let
-// one reach the screen.
 
 export interface SummaryItem {
   text: string;
@@ -237,10 +204,7 @@ export interface PatientSummary {
   patient_id: string;
   /** `mock | openai | anthropic | custom`. Only `mock` exists in Phase 4B. */
   provider: string;
-  /**
-   * Stored server-side, never inferred from the prose. Drives the demo label,
-   * so a deterministic summary can never be mistaken for a model's.
-   */
+   /** Stored server-side, never inferred from the prose. Drives the demo label, */
   is_mock: boolean;
   model: string | null;
   disclaimer: string;

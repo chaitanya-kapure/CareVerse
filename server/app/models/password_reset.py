@@ -1,15 +1,4 @@
-"""`password_reset_otps` collection.
-
-One document per issued OTP. This is a sixth collection, which is a
-deliberate and narrow deviation from the five-collection model in spec
-section 12: the five are clinical data (users, profiles, documents, access,
-summaries) and this is transient authentication state with a different
-lifetime. Folding it into `users` would mean every document carried the
-current reset code, and the TTL cleanup below would be impossible.
-
-Nothing here is a medical record. The document holds a credential and the
-timestamps needed to expire it.
-"""
+"""`password_reset_otps` collection."""
 
 from datetime import datetime
 from typing import Optional, TypedDict
@@ -45,11 +34,7 @@ ACTIVE_FIELDS = {
 
 
 def otp_is_active(record: PasswordResetOtpDocument) -> bool:
-    """True while the record can still be exchanged for a reset token.
-
-    Checks every gate in one place so the request, verify and reset paths
-    cannot disagree about what "active" means.
-    """
+    """True while the record can still be exchanged for a reset token."""
     if record.get("consumed_at") is not None:
         return False
     if record.get("attempts", 0) >= record.get("max_attempts", 0):

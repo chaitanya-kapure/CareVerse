@@ -5,30 +5,13 @@ import Button from "./ui/Button";
 import { getErrorMessage } from "../services/api";
 
 interface DocumentFileActionsProps {
-  /**
-   * Fetches the stored PDF as bytes.
-   *
-   * Passed in rather than derived from a document id, because the two callers
-   * live behind different authorization boundaries: the patient fetches from
-   * `/patients/me/documents/...`, the doctor from
-   * `/doctor/patients/{id}/documents/...`. The object-URL and popup dance below
-   * is identical either way, so only this function differs.
-   */
+   /** Fetches the stored PDF as bytes. */
   fetchOriginal: () => Promise<Blob>;
   /** Name suggested when saving, from the record's own stored filename. */
   filename: string;
 }
 
-/**
- * "View original" and "Download" for a stored PDF.
- *
- * Shared so there is one implementation of the two things that are easy to get
- * wrong in a medical-record viewer: the blob is fetched with the bearer token
- * rather than linked (a plain `<a>` cannot authenticate and would 401), and
- * the object URL is revoked when the screen goes away, because object URLs
- * are a browser resource the garbage collector does not reclaim -- a leaked
- * one keeps the bytes of a patient's document alive in the tab indefinitely.
- */
+ /** "View original" and "Download" for a stored PDF. */
 export default function DocumentFileActions({
   fetchOriginal,
   filename,

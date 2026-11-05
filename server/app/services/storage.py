@@ -1,20 +1,4 @@
-"""Storage driver seam.
-
-One interface, one implementation for now. `StorageDriver` is a Protocol
-rather than a base class so a later `S3StorageDriver` drops in without
-subscribing to anything -- the callers only ever see the four methods below.
-
-Rules this layer enforces, because they are easy to get wrong once:
-
-  * The stored key is generated here, never taken from the upload. A filename
-    is attacker-controlled input and the one value that must not decide where
-    bytes land on disk.
-  * Every key is resolved and checked against the driver root, so a key
-    containing `../` cannot walk out of the storage directory even if one
-    reaches this layer.
-  * The driver raises `StorageError`; it never returns a partial success.
-    A file that is not durably written must not produce a database row.
-"""
+"""Storage driver seam."""
 
 import logging
 import uuid
@@ -69,8 +53,6 @@ class LocalStorageDriver:
 
     def new_key(self, suffix: str = ".pdf") -> str:
         # uuid4 is fine here: the key only has to be unguessable enough to
-        # avoid directory listings being a useful attack, and it never
-        # authorises anything on its own.
         return f"{uuid.uuid4().hex}{suffix}"
 
     def _resolve(self, key: str) -> Path:
@@ -122,21 +104,13 @@ class LocalStorageDriver:
 
 
 # --- wiring ----------------------------------------------------------------
-#
-# Cached on the module rather than rebuilt per request, and overridable so a
-# test can point the app at a temporary directory.
 
 
 _driver: Optional[StorageDriver] = None
 
 
 def build_driver() -> StorageDriver:
-    """Construct the driver named by STORAGE_DRIVER.
-
-    An unknown value raises rather than silently falling back to local disk:
-    quietly downgrading an intended S3 deployment to local storage would be
-    the kind of failure that only shows up when the box is rebuilt.
-    """
+    """Construct the driver named by STORAGE_DRIVER."""
     driver = settings.storage_driver.strip().lower()
     if driver == "local":
         return LocalStorageDriver(Path(settings.storage_local_path) / "documents")

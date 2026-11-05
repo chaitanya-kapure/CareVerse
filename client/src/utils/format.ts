@@ -1,9 +1,4 @@
-/**
- * Display formatting shared by the record screens.
- *
- * Deliberately separate from the API layer: these functions shape text for a
- * human reading it, and none of their output is ever written back.
- */
+ /** Display formatting shared by the record screens. */
 
 const DATE_UNITS = ["KB", "MB", "GB"];
 
@@ -22,15 +17,7 @@ export function formatBytes(bytes: number): string {
   return `${value.toFixed(value < 10 ? 1 : 0)} ${unit}`;
 }
 
-/**
- * Parse a date without the timezone trap.
- *
- * `document_date` arrives as a bare `YYYY-MM-DD`. `new Date("2026-06-01")`
- * treats that as UTC midnight, so anywhere west of Greenwich it renders as
- * 31 May -- quietly showing a patient the wrong day on a medical record.
- * Bare dates are therefore built in local time, and only real timestamps go
- * through `new Date`.
- */
+ /** Parse a date without the timezone trap. */
 function parseDate(value: string): Date | null {
   const bare = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
   if (bare) {
@@ -67,13 +54,7 @@ export function formatDateTime(value: string | null | undefined): string {
   });
 }
 
-/**
- * Human labels for the stored `DocumentCategory` values.
- *
- * The category is what the patient chose at upload time, never something
- * derived from the file's contents -- so this only ever reformats a word
- * they already picked.
- */
+ /** Human labels for the stored `DocumentCategory` values. */
 const CATEGORY_LABELS: Record<string, string> = {
   lab_report: "Lab report",
   prescription: "Prescription",
@@ -87,13 +68,7 @@ export function formatCategory(value: string | null | undefined): string {
   return CATEGORY_LABELS[value] ?? value;
 }
 
-/**
- * Human labels for the stored `Gender` values.
- *
- * "unspecified" is the profile default and means the patient chose not to say
- * it, so it is rendered as "Not recorded" rather than as a gender -- a
- * clinician should not read a default as a finding.
- */
+ /** Human labels for the stored `Gender` values. */
 const GENDER_LABELS: Record<string, string> = {
   male: "Male",
   female: "Female",

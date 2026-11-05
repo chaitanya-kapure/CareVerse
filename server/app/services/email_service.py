@@ -1,27 +1,4 @@
-"""Email delivery, isolated behind a provider interface.
-
-The authentication flow never imports `smtplib` or knows which provider is
-configured. It calls `send_password_reset_otp(...)` and gets a boolean. That
-is the whole point of the abstraction: switching to a real provider later is
-a change to `EMAIL_PROVIDER` in the environment, not an edit to the reset
-logic, the controller, or the routes.
-
-Providers
----------
-`mock`   Writes the message to the server log and to an in-memory outbox.
-         Development only, and `config.py` refuses to start with this
-         provider when ENVIRONMENT=production, because the log line is a
-         plaintext OTP and logs are not a secret store.
-`smtp`   Sends through any SMTP relay. Credentials come from the
-         environment and are never logged or returned.
-`gmail`  Reserved for a Gmail API client. Not implemented; selecting it
-         fails loudly instead of silently dropping the message.
-
-Node note: the original spec suggested Nodemailer. That is a Node library
-and this backend is FastAPI, so the equivalent seam is `smtplib` from the
-standard library. The interface below is the thing a Nodemailer-backed
-implementation would have implemented on the Node side.
-"""
+"""Email delivery, isolated behind a provider interface."""
 
 import logging
 import smtplib
@@ -36,11 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class EmailDeliveryError(RuntimeError):
-    """Raised by a provider when a message could not be handed off.
-
-    Carries no recipient detail in its message: it is logged, and the log
-    line must not become a way to enumerate accounts.
-    """
+    """Raised by a provider when a message could not be handed off."""
 
 
 @dataclass(frozen=True)
@@ -63,8 +36,6 @@ class EmailProvider(Protocol):
 
 def _reset_otp_body(otp: str, expires_in_minutes: int) -> str:
     # No clinical content and no health claims: this is an account-recovery
-    # message, so it deliberately does not repeat the medical disclaimer or
-    # restate anything about records or summaries.
     return (
         f"Your CAREVERSE verification code is: {otp}\n\n"
         f"It expires in {expires_in_minutes} minutes.\n\n"
@@ -75,12 +46,7 @@ def _reset_otp_body(otp: str, expires_in_minutes: int) -> str:
 
 
 class MockEmailProvider:
-    """Development provider: logs the OTP instead of sending it.
-
-    The OTP in the log is the point -- it is what makes this flow testable
-    without a mail account. It is also the reason production is refused at
-    config validation time, so that convenience can never become a leak.
-    """
+    """Development provider: logs the OTP instead of sending it."""
 
     name = "mock"
 
@@ -95,8 +61,6 @@ class MockEmailProvider:
             OutgoingEmail(to=to_email, subject=subject, body=_reset_otp_body(otp, expires_in_minutes))
         )
         # DEVELOPMENT ONLY -- the log line below contains a live credential.
-        # Safe solely because config.py refuses EMAIL_PROVIDER=mock when
-        # ENVIRONMENT=production.
         logger.warning(
             "DEVELOPMENT ONLY - password reset OTP for %s: %s (not emailed)",
             to_email,
@@ -171,14 +135,7 @@ class SmtpEmailProvider:
 
 
 class GmailApiEmailProvider:
-    """Placeholder for the Gmail API provider.
-
-    The spec allows for Gmail or SMTP. SMTP is implemented and sufficient;
-    this exists so that `EMAIL_PROVIDER=gmail` is a recognised, documented
-    value rather than an unknown one, and so the wiring point is already in
-    place. It raises instead of no-oping, because a silent no-op would mean
-    password resets that appear to succeed and never send anything.
-    """
+    """Placeholder for the Gmail API provider."""
 
     name = "gmail"
 
@@ -239,11 +196,7 @@ def reset_email_provider() -> None:
 
 
 def get_mock_outbox() -> list[OutgoingEmail]:
-    """Captured mock messages, if the active provider is the mock one.
-
-    Returns an empty list for real providers rather than raising, so a test
-    can assert "nothing was emailed" against any configuration.
-    """
+    """Captured mock messages, if the active provider is the mock one."""
     provider = _registry.provider
     if isinstance(provider, MockEmailProvider):
         return provider.drain_outbox()
@@ -253,14 +206,7 @@ def get_mock_outbox() -> list[OutgoingEmail]:
 def send_password_reset_otp(
     to_email: str, otp: str, expires_in_minutes: int
 ) -> bool:
-    """Best-effort delivery. Returns False instead of raising.
-
-    The caller deliberately cannot distinguish "address does not exist" from
-    "the mail relay is down". If a send failure propagated as a 5xx, then
-    `forgot-password` would return 200 for unknown addresses and 500 for
-    real ones, which hands an attacker a working account-enumeration oracle.
-    Both paths return 200; the failure is recorded in the server log only.
-    """
+    """Best-effort delivery. Returns False instead of raising."""
     try:
         get_email_provider().send_password_reset_otp(
             to_email=to_email, otp=otp, expires_in_minutes=expires_in_minutes

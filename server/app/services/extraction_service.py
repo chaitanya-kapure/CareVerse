@@ -1,23 +1,4 @@
-"""PDF text extraction.
-
-Scope of this module: turn PDF bytes into text, and say honestly when it
-cannot. It does not interpret what it read.
-
-Two rules that are easy to lose and impossible to undo once they leak into
-the data:
-
-  * Nothing is invented. An image-only or scanned PDF has no embedded text,
-    and the correct answer for it is `needs_ocr` with no text at all -- not
-    a plausible reconstruction, and not an empty string that a later screen
-    could mistake for "this record says nothing".
-  * The extraction status is never a guess. `completed` means pypdf actually
-    returned characters; `failed` means it raised; `needs_ocr` means it read
-    the document fine and there was simply nothing there to read.
-
-OCR is deliberately not implemented here. `ExtractionStatus` already carries
-`needs_ocr` so the UI and the schema can state the outcome, and the OCR pass
-can be added later behind this function without changing the caller.
-"""
+"""PDF text extraction."""
 
 import io
 import logging
@@ -33,33 +14,17 @@ from app.services import ocr_service
 logger = logging.getLogger(__name__)
 
 # Below this many characters of extracted text the document is treated as
-# image-only. A real page of lab results carries orders of magnitude more;
-# an image-only page yields nothing, or at most a stray character or two from
-# a page number. The constant is named so the trade-off is visible: raising it
-# risks marking a very short-but-real record as unreadable.
 NEEDS_OCR_MIN_CHARS = 10
 
 # Maximum characters stored per document. A pathological 5000-page PDF should
-# not be able to write an unbounded string into one Mongo document (16 MB cap),
-# and anything past this is not going to be read in the UI anyway.
 MAX_EXTRACTED_CHARS = 500_000
 
 # Extraction is synchronous within the request, so it has to be bounded. The
-# byte cap does not bound the work: many tiny pages fit in a few MB, and
-# `extract_text()` runs per page. Above this the document is refused for
-# extraction rather than truncated -- silently extracting half of a medical
-# record is worse than saying we did not extract it at all. The stored file is
-# unaffected and stays downloadable.
 MAX_PAGES = 1_000
 
 
 class ExtractionOutcome(dict):
-    """The fixed shape every result carries, so a caller cannot depend on a
-    partial result.
-
-    Keys: `extraction_status`, `extracted_text`, `page_count`,
-    `character_count`, `extraction_error`, `extracted_at`.
-    """
+    """The fixed shape every result carries, so a caller cannot depend on a"""
 
 
 def _outcome(
@@ -79,12 +44,7 @@ def _outcome(
 
 
 def _normalize(raw: str) -> str:
-    """Make extracted text predictable without altering what it says.
-
-    Normalization is limited to whitespace: line endings are unified and NUL
-    bytes (which Mongo will reject) are dropped. Rewrapping, reflowing or
-    "cleaning up" wording here would quietly edit a medical record.
-    """
+    """Make extracted text predictable without altering what it says."""
     text = raw.replace("\x00", "")
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     lines = [line.rstrip() for line in text.split("\n")]
@@ -92,12 +52,7 @@ def _normalize(raw: str) -> str:
 
 
 def extract_text(content: bytes) -> ExtractionOutcome:
-    """Extract embedded text from PDF bytes.
-
-    Never raises. Every failure path returns a status, because a failure here
-    must degrade the document to `failed` rather than failing the upload that
-    already stored the file successfully.
-    """
+    """Extract embedded text from PDF bytes."""
     if not content:
         return _outcome("failed", None, None, "The file is empty.")
 
@@ -130,9 +85,6 @@ def extract_text(content: bytes) -> ExtractionOutcome:
             )
 
     # --- per-page extraction ------------------------------------------------
-    # One unreadable page must not discard pages that did read. pypdf can
-    # raise on a single damaged object while the rest of the file is fine,
-    # and walking the page tree can itself fail on a malformed catalog.
     pages_read = 0
     pieces: list[str] = []
     try:

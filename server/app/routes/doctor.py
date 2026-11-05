@@ -1,15 +1,4 @@
-"""Doctor endpoints.
-
-Read-only. A doctor sees the records of patients who authorized them and can
-do nothing else to them: no upload, no edit, no delete. The patient remains
-the owner of their records, and there is deliberately no doctor-side route
-that could change one.
-
-Note the shape of the URLs: `{patient_id}` is in the path, which is exactly
-why `assert_patient_access` is called on every single handler. An id in a path
-is attacker-controlled input, and the only thing standing between a doctor and
-another patient's medical history is that check.
-"""
+"""Doctor endpoints."""
 
 from typing import Annotated
 
@@ -30,8 +19,6 @@ from app.schemas.summary import PatientSummaryResponse
 router = APIRouter(prefix="/doctor", tags=["doctor"])
 
 # Role gate. It answers "is this account a doctor at all"; it says nothing
-# about which patients that doctor may read, which is the separate
-# per-request check every handler below performs.
 DoctorUser = Annotated[UserDocument, Depends(require_roles("doctor"))]
 
 
@@ -89,14 +76,7 @@ async def get_patient_document_file(
     summary="The patient's summary, generated on demand",
 )
 async def get_patient_summary(patient_id: str, user: DoctorUser):
-    """Read-only, like every other route on this router.
-
-    Returns the persisted summary, generating one first if this patient has
-    none yet or if their readable record set has changed since it was written.
-    The patient id is authorized inside `SummaryController` before the service
-    is reached, so the 403 for an ungranted or nonexistent patient is the same
-    one the rest of this router already returns.
-    """
+    """Read-only, like every other route on this router."""
     return await SummaryController.get_for_doctor(patient_id, user)
 
 
@@ -106,11 +86,5 @@ async def get_patient_summary(patient_id: str, user: DoctorUser):
     summary="Force the summary to be rebuilt from the current records",
 )
 async def regenerate_patient_summary(patient_id: str, user: DoctorUser):
-    """Rebuild now, ignoring the staleness check.
-
-    A POST and not a PUT: nothing about a summary is edited by hand, so there
-    is no update body and no delete. Every line in the result is copied from a
-    record the doctor can open, which means the only thing to do with a
-    summary that looks wrong is read the records again.
-    """
+    """Rebuild now, ignoring the staleness check."""
     return await SummaryController.regenerate_for_doctor(patient_id, user)
