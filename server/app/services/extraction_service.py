@@ -28,6 +28,7 @@ from pypdf import PdfReader
 from pypdf.errors import PyPdfError
 
 from app.models.medical_document import ExtractionStatus
+from app.services import ocr_service
 
 logger = logging.getLogger(__name__)
 
@@ -178,8 +179,21 @@ def extract_text(content: bytes) -> ExtractionOutcome:
         combined = combined[:MAX_EXTRACTED_CHARS]
 
     if len(combined.strip()) < NEEDS_OCR_MIN_CHARS:
-        # Readable document, no embedded text: the scan case. Storing None
-        # rather than "" so no screen can present "no text found" as content.
+        # Document has little/no embedded digital text (scanned or image-only PDF).
+        # Run Optical Character Recognition (OCR) to extract text.
+        logger.info("Embedded text below threshold. Running OCR pass...")
+        try:
+            ocr_text, _ = ocr_service.ocr_pdf(content, max_pages=min(page_count, 50))
+            if ocr_text and len(ocr_text.strip()) >= NEEDS_OCR_MIN_CHARS:
+                cleaned_ocr = _normalize(ocr_text)
+                if len(cleaned_ocr) >= MAX_EXTRACTED_CHARS:
+                    cleaned_ocr = cleaned_ocr[:MAX_EXTRACTED_CHARS]
+                logger.info("OCR successfully extracted %d characters from scanned PDF", len(cleaned_ocr))
+                return _outcome("completed", cleaned_ocr, page_count)
+        except Exception as ocr_err:
+            logger.warning("OCR pass failed: %s", ocr_err)
+
+        # Readable document, no embedded text and OCR found nothing: the blank scan case.
         return _outcome("needs_ocr", None, page_count)
 
     return _outcome("completed", combined, page_count)

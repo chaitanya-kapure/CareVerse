@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     storage_driver: str = "local"
     storage_local_path: str = "storage"
     max_upload_mb: int = 15
-    allowed_mime_types: str = "application/pdf"
+    allowed_mime_types: str = "application/pdf,image/jpeg,image/png,image/webp"
 
     # --- AI summarization (Phase 4C) ------------------------------------
     # `ai_provider` selects the implementation: "mock" (deterministic, the

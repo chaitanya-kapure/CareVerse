@@ -61,12 +61,12 @@ export default function LandingPage() {
       <main className="mx-auto max-w-6xl px-6 py-16">
         <div className="max-w-2xl">
           <h1 className="text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
-            One patient profile, instead of a folder full of PDFs.
+            One patient health profile, instead of scattered folders and files.
           </h1>
-          <p className="mt-4 text-lg text-slate-600">
-            CAREVERSE centralizes the medical documents a patient has already uploaded, and
-            turns them into a concise summary a doctor can review in seconds — with every claim
-            traceable back to the original record.
+          <p className="mt-4 text-lg text-slate-600 leading-relaxed">
+            CAREVERSE centralizes your medical history. Upload lab reports, doctor prescriptions,
+            and discharge summaries — as PDFs or photos. Our built-in OCR automatically reads
+            vital data and generates an instant, source-linked clinical summary.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             {status === "unauthenticated" && (
@@ -124,7 +124,7 @@ export default function LandingPage() {
 
       <footer className="border-t border-slate-200 bg-white">
         <div className="mx-auto max-w-6xl px-6 py-6 text-sm text-slate-500">
-          CAREVERSE — hackathon MVP. PDF uploads only.
+          CAREVERSE — Centralized Patient Health Records & AI Summaries. Supports PDFs and photos with OCR.
         </div>
       </footer>
     </div>

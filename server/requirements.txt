@@ -16,8 +16,11 @@ pymongo==4.10.1
 bcrypt==4.2.1
 python-jose[cryptography]==3.3.0
 
-# --- Document pipeline (Phase 2) ----------------------------------------
+# --- Document pipeline & OCR --------------------------------------------
 pypdf==5.1.0                     # pure-python PDF text extraction, no native deps
+pypdfium2>=4.30.0                # fast PDF page rendering for OCR
+rapidocr-onnxruntime>=1.2.0      # ONNX-based OCR for scanned documents & prescriptions
+pillow>=10.0.0                   # image processing and conversion
 
 # --- AI provider client (Phase 4B) --------------------------------------
 httpx==0.28.1

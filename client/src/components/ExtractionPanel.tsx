@@ -52,13 +52,12 @@ export default function ExtractionPanel({ record, audience }: ExtractionPanelPro
   if (record.extraction_status === "needs_ocr") {
     return (
       <>
-        <Alert tone="warning" title="Text extraction was skipped">
+        <Alert tone="warning" title="No readable text detected">
           {OCR_REQUIRED_NOTICE}
         </Alert>
         <p className="mt-3 text-sm text-slate-600">
-          The PDF itself is stored and can be viewed or downloaded above. Optical
-          character recognition is not available in this phase, so no text is shown
-          rather than a guess at what the scan says.
+          The document itself is safely preserved and can be viewed or downloaded above. If this
+          is a handwritten or low-contrast scan, you can view the original file anytime.
         </p>
       </>
     );

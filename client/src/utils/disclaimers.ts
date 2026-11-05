@@ -31,9 +31,9 @@ export const NOT_A_DIAGNOSIS_READER_NOTICE =
 export const EXTRACTION_NOTICE =
   "Extracted text is produced automatically and may be incomplete or misread. Always confirm values against the original document.";
 
-/** Shown when a PDF has no readable embedded text. */
+/** Shown when a PDF has no readable embedded text even after OCR. */
 export const OCR_REQUIRED_NOTICE =
-  "This PDF contains no readable text. It looks like a scanned or image-only document, so automated extraction was skipped.";
+  "No readable text could be detected from this document even after automated OCR scanning. The original file is stored safely and can be viewed or downloaded.";
 
 /**
  * Label for a summary the deterministic provider produced.

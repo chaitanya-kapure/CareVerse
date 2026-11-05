@@ -4,7 +4,7 @@
   "private": true,
   "description": "CAREVERSE — centralized patient health records with traceable, AI-assisted summaries. Hackathon MVP.",
   "scripts": {
-    "setup": "npm install --prefix client",
+    "setup": "npm install && npm install --prefix client",
     "dev": "concurrently -n api,web -c cyan,magenta \"python server/dev.py\" \"npm --prefix client run dev\"",
     "dev:client": "npm --prefix client run dev",
     "dev:server": "python server/dev.py",

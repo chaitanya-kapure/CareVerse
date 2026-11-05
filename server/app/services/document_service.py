@@ -41,7 +41,7 @@ from app.config import settings
 from app.models.collections import get_medical_documents
 from app.models.medical_document import MedicalDocumentDocument, serialize_document
 from app.schemas.documents import UploadMeta
-from app.services import extraction_service, structured_extraction
+from app.services import clinical_analyzer, extraction_service, structured_extraction
 from app.services.extraction_service import ExtractionOutcome
 from app.services.storage import StorageDriver, StorageError, get_storage_driver
 from app.utils import errors
@@ -93,21 +93,43 @@ class DocumentService:
             )
 
         content_type = (file.content_type or "").split(";")[0].strip().lower()
-        if content_type not in settings.allowed_mime_list:
+        if content_type not in settings.allowed_mime_list and not (
+            file.filename and file.filename.lower().endswith((".pdf", ".jpg", ".jpeg", ".png", ".webp"))
+        ):
             raise errors.unsupported_media_type(
-                "Only PDF files can be uploaded.",
+                "Only PDF and image files (JPG, PNG, WebP) can be uploaded.",
                 code="UNSUPPORTED_FILE_TYPE",
             )
 
         content = await self._read_capped(file)
 
-        # The extension and MIME type were both asserted by the client; this
-        # is where the file says what it really is.
-        if not content.startswith(PDF_MAGIC):
+        # Validate byte signature
+        is_pdf = content.startswith(PDF_MAGIC)
+        is_jpeg = content.startswith(b"\xff\xd8\xff")
+        is_png = content.startswith(b"\x89PNG\r\n\x1a\n")
+        is_webp = content.startswith(b"RIFF") and len(content) > 12 and content[8:12] == b"WEBP"
+
+        if not (is_pdf or is_jpeg or is_png or is_webp):
             raise errors.bad_request(
-                "That file is not a valid PDF. Please upload a PDF document.",
+                "That file is not a supported document. Please upload a PDF or image document (JPG, PNG).",
                 code="INVALID_FILE_TYPE",
             )
+
+        # If an image was uploaded, convert it to a standard PDF document so storage and downstream viewers remain uniform
+        if not is_pdf and (is_jpeg or is_png or is_webp):
+            try:
+                import io
+                from PIL import Image
+                img = Image.open(io.BytesIO(content)).convert("RGB")
+                pdf_buf = io.BytesIO()
+                img.save(pdf_buf, format="PDF")
+                content = pdf_buf.getvalue()
+            except Exception as conv_err:
+                logger.warning("Failed to convert image to PDF: %s", conv_err)
+                raise errors.bad_request(
+                    "The uploaded image could not be processed into a medical document.",
+                    code="IMAGE_CONVERSION_FAILED",
+                ) from conv_err
 
         original_name = _safe_filename(file.filename)
         title = meta.title.strip() or _title_from_filename(original_name)
@@ -164,7 +186,7 @@ class DocumentService:
         # file, so one crafted PDF must not stall every other request. The
         # structured pass runs in the same thread for the same reason -- it is
         # regex work over that same text, on up to 500,000 characters of it.
-        outcome = await asyncio.to_thread(_extract_text_and_structure, content)
+        outcome = await asyncio.to_thread(_extract_text_and_structure, content, meta.category)
 
         # A failure here still returns the document. It is recorded as
         # `failed` and the upload succeeds -- see the module docstring.
@@ -204,7 +226,33 @@ class DocumentService:
         return {"items": items, "total": len(items)}
 
     def get(self, patient_id: str, document_id: str) -> dict:
-        return serialize_document(self._find(patient_id, document_id), include_text=True)
+        doc = self._find(patient_id, document_id)
+        # If the document has text but lacks analysis_verdict (e.g. existing record), compute and persist it
+        if doc.get("extracted_text") and not (doc.get("extracted_data") or {}).get("analysis_verdict"):
+            try:
+                extracted_data = dict(doc.get("extracted_data") or {})
+                analysis = clinical_analyzer.analyze_document_content(
+                    doc.get("extracted_text") or "",
+                    category=doc.get("category", "other"),
+                    structured_data=extracted_data,
+                )
+                extracted_data["analysis_verdict"] = analysis
+                if not extracted_data.get("referring_doctor") and analysis.get("doctor"):
+                    extracted_data["referring_doctor"] = analysis["doctor"]
+                if not extracted_data.get("referring_facility") and analysis.get("facility"):
+                    extracted_data["referring_facility"] = analysis["facility"]
+                if not extracted_data.get("specialty") and analysis.get("specialty"):
+                    extracted_data["specialty"] = analysis["specialty"]
+
+                doc["extracted_data"] = extracted_data
+                self._docs.update_one(
+                    {"_id": doc["_id"]},
+                    {"$set": {"extracted_data": extracted_data, "updated_at": _utcnow()}},
+                )
+            except Exception as e:
+                logger.warning("Auto-analysis failed for doc %s: %s", document_id, e)
+
+        return serialize_document(doc, include_text=True)
 
     def read_file(self, patient_id: str, document_id: str) -> tuple[str, str, bytes]:
         """Return (content_type, download_filename, bytes) for a stored PDF."""
@@ -280,7 +328,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _extract_text_and_structure(content: bytes) -> ExtractionOutcome:
+def _extract_text_and_structure(content: bytes, category: str = "other") -> ExtractionOutcome:
     """Text first, and only then structured facts.
 
     The ordering is the safety property, not an implementation detail. A
@@ -301,9 +349,27 @@ def _extract_text_and_structure(content: bytes) -> ExtractionOutcome:
     if outcome.get("extraction_status") != "completed":
         return outcome
 
-    outcome["extracted_data"] = structured_extraction.extract_structured(
-        outcome.get("extracted_text") or ""
-    )
+    text = outcome.get("extracted_text") or ""
+    extracted_data = structured_extraction.extract_structured(text)
+
+    # Run clinical analysis to generate patient-friendly observations and verdict
+    try:
+        analysis = clinical_analyzer.analyze_document_content(
+            text,
+            category=category,
+            structured_data=extracted_data,
+        )
+        extracted_data["analysis_verdict"] = analysis
+        if not extracted_data.get("referring_doctor") and analysis.get("doctor"):
+            extracted_data["referring_doctor"] = analysis["doctor"]
+        if not extracted_data.get("referring_facility") and analysis.get("facility"):
+            extracted_data["referring_facility"] = analysis["facility"]
+        if not extracted_data.get("specialty") and analysis.get("specialty"):
+            extracted_data["specialty"] = analysis["specialty"]
+    except Exception as exc:
+        logger.warning("Clinical analysis failed: %s", exc)
+
+    outcome["extracted_data"] = extracted_data
     return outcome
 
 

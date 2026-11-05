@@ -100,14 +100,19 @@ export default function PatientSummaryPage() {
   return (
     <>
       <PageHeader
-        title="My summary"
-        description="Assembled from the records you have uploaded. Every line below links to the record it came from."
+        title="My Health Summary"
+        description="Consolidated overview assembled from your uploaded medical records. Every claim links to the specific record it came from."
         actions={
-          <Link to="/patient/records">
-            <Button variant="secondary" size="sm">
-              View all my records
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={() => window.print()}>
+              🖨️ Print Summary
             </Button>
-          </Link>
+            <Link to="/patient/records">
+              <Button variant="secondary" size="sm">
+                View All Records
+              </Button>
+            </Link>
+          </div>
         }
       />
 

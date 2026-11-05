@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 
@@ -11,32 +11,36 @@ import { documentService } from "../../services/document.service";
 import { getErrorMessage } from "../../services/api";
 import { formatBytes } from "../../utils/format";
 
-/**
- * Client-side copy of the server's `MAX_UPLOAD_MB` (see
- * `server/.env.example`). It exists only to save a patient on a slow
- * connection from uploading 40 MB that the server will refuse anyway --
- * the server re-checks the real size and its message is authoritative if
- * the two ever disagree.
- */
 const MAX_UPLOAD_MB = 15;
 
 const CATEGORIES = [
-  { value: "lab_report", label: "Lab report" },
-  { value: "prescription", label: "Prescription" },
-  { value: "discharge_summary", label: "Discharge summary" },
-  { value: "imaging", label: "Imaging" },
-  { value: "other", label: "Something else" },
+  { value: "lab_report", label: "🧪 Lab report (Blood test, Urine, Pathology)" },
+  { value: "prescription", label: "💊 Doctor's Prescription" },
+  { value: "discharge_summary", label: "🏥 Hospital Discharge Summary" },
+  { value: "imaging", label: "🩻 Imaging Report (X-Ray, MRI, CT, Ultrasound)" },
+  { value: "other", label: "📄 Other Medical Document" },
 ];
 
 export default function UploadRecordPage() {
   const navigate = useNavigate();
 
   const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [title, setTitle] = useState("");
-  const [category, setCategory] = useState("other");
+  const [category, setCategory] = useState("lab_report");
   const [documentDate, setDocumentDate] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    if (file && file.type.startsWith("image/")) {
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+      return () => URL.revokeObjectURL(url);
+    } else {
+      setPreviewUrl(null);
+    }
+  }, [file]);
 
   const upload = useMutation({
     mutationFn: () =>
@@ -46,44 +50,49 @@ export default function UploadRecordPage() {
         category,
         document_date: documentDate || undefined,
       }),
-    // Land on the finished record rather than a toast: the patient's next
-    // question is always "did it read my report?".
     onSuccess: (created) => navigate(`/patient/records/${created.id}`),
   });
 
-  /** Rejects the obvious cases here so they are explained, not just failed. */
   const choose = (candidate: File | undefined | null) => {
     if (!candidate) return;
     setLocalError(null);
     upload.reset();
 
-    const looksLikePdf =
-      candidate.type === "application/pdf" ||
-      candidate.name.toLowerCase().endsWith(".pdf");
+    const fileNameLower = candidate.name.toLowerCase();
+    const isPdf =
+      candidate.type === "application/pdf" || fileNameLower.endsWith(".pdf");
+    const isImage =
+      candidate.type.startsWith("image/") ||
+      fileNameLower.endsWith(".jpg") ||
+      fileNameLower.endsWith(".jpeg") ||
+      fileNameLower.endsWith(".png") ||
+      fileNameLower.endsWith(".webp");
 
-    if (!looksLikePdf) {
+    if (!isPdf && !isImage) {
       setLocalError(
-        "Only PDF files can be uploaded. Export your document as a PDF and try again.",
+        "Supported file types: PDF documents and images (JPG, PNG, WebP). Please select a valid document.",
       );
       return;
     }
     if (candidate.size > MAX_UPLOAD_MB * 1024 * 1024) {
       setLocalError(
-        `That file is ${formatBytes(candidate.size)}. The limit is ${MAX_UPLOAD_MB} MB -- ` +
-          "try exporting a smaller range of pages.",
+        `That file is ${formatBytes(candidate.size)}. The limit is ${MAX_UPLOAD_MB} MB. Please upload a smaller file.`,
       );
       return;
     }
 
     setFile(candidate);
-    if (!title.trim()) setTitle(candidate.name.replace(/\.pdf$/i, ""));
+    if (!title.trim()) {
+      const cleanTitle = candidate.name.replace(/\.(pdf|jpe?g|png|webp)$/i, "");
+      setTitle(cleanTitle);
+    }
   };
 
   const onSubmit = (event: React.FormEvent) => {
     event.preventDefault();
     setLocalError(null);
     if (!file) {
-      setLocalError("Choose a PDF to upload first.");
+      setLocalError("Please select a document or photo to upload.");
       return;
     }
     upload.mutate();
@@ -94,19 +103,23 @@ export default function UploadRecordPage() {
   return (
     <>
       <PageHeader
-        title="Upload a medical record"
-        description="PDF reports, prescriptions and discharge summaries. Your file is stored once and its text is extracted automatically."
+        title="Upload Medical Document"
+        description="Add your lab reports, doctor prescriptions, or discharge summaries. PDF documents and camera photos (JPG/PNG) are supported with automatic OCR text extraction."
       />
 
       {error && (
-        <Alert tone="danger" title="The upload did not go through" className="mb-4">
+        <Alert tone="danger" title="Upload could not proceed" className="mb-4">
           {error}
         </Alert>
       )}
 
       <form onSubmit={onSubmit} noValidate>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Card title="Choose a PDF" description="Drag one in, or select it.">
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* File Picker Card */}
+          <Card
+            title="1. Select Document or Photo"
+            description="Drag and drop or browse from your device."
+          >
             <div
               onDragOver={(event) => {
                 event.preventDefault();
@@ -118,99 +131,172 @@ export default function UploadRecordPage() {
                 setDragging(false);
                 choose(event.dataTransfer.files?.[0]);
               }}
-              className={`flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed px-4 py-8 text-center transition-colors ${
-                dragging ? "border-teal-600 bg-teal-50" : "border-slate-300 bg-slate-50"
+              className={`flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-6 text-center transition-all ${
+                dragging
+                  ? "border-teal-600 bg-teal-50"
+                  : "border-slate-300 bg-slate-50 hover:bg-slate-100/70"
               }`}
             >
-              <label className="cursor-pointer text-center">
-                <input
-                  type="file"
-                  accept="application/pdf,.pdf"
-                  className="sr-only"
-                  onChange={(event) => {
-                    const picked = event.target.files?.[0];
-                    // Cleared so the same file can be selected again after a
-                    // rejection -- otherwise a fixed-but-identical file fires
-                    // no change event and the patient gets no feedback.
-                    event.target.value = "";
-                    choose(picked);
-                  }}
-                />
-                <span className="text-sm font-medium text-teal-700 hover:underline">
-                  Select a PDF
-                </span>
-              </label>
-              <p className="text-xs text-slate-500">
-                or drop one here - up to {MAX_UPLOAD_MB} MB
-              </p>
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-teal-100 text-teal-700">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-6 w-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                  />
+                </svg>
+              </div>
 
+              <div>
+                <label className="cursor-pointer">
+                  <input
+                    type="file"
+                    accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp"
+                    className="sr-only"
+                    onChange={(event) => {
+                      const picked = event.target.files?.[0];
+                      event.target.value = "";
+                      choose(picked);
+                    }}
+                  />
+                  <span className="rounded-md bg-teal-700 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-teal-800 transition-colors">
+                    Browse File or Photo
+                  </span>
+                </label>
+                <p className="mt-2 text-xs text-slate-500">
+                  Drag & drop PDF, JPG, or PNG up to {MAX_UPLOAD_MB} MB
+                </p>
+              </div>
+
+              {/* Selected File / Preview Box */}
               {file && (
-                <div className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-left">
-                  <p className="truncate text-sm font-medium text-slate-900">{file.name}</p>
-                  <p className="text-xs text-slate-500">{formatBytes(file.size)}</p>
+                <div className="mt-3 w-full rounded-lg border border-teal-200 bg-white p-3 text-left shadow-sm">
+                  <div className="flex items-center gap-3">
+                    {previewUrl ? (
+                      <img
+                        src={previewUrl}
+                        alt="Document Preview"
+                        className="h-16 w-16 rounded object-cover border border-slate-200"
+                      />
+                    ) : (
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded bg-red-50 text-red-600 font-bold text-xs uppercase">
+                        PDF
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-900">
+                        {file.name}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {formatBytes(file.size)} • Ready for OCR extraction
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setFile(null)}
+                      className="text-xs font-medium text-slate-400 hover:text-red-600"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
 
-            <div className="mt-4 flex items-center gap-3">
-              <Button type="submit" isLoading={upload.isPending} disabled={!file}>
-                {upload.isPending ? "Uploading..." : "Upload record"}
+            <div className="mt-6 flex items-center gap-4">
+              <Button type="submit" isLoading={upload.isPending} disabled={!file} size="lg">
+                {upload.isPending ? "Uploading & Extracting..." : "Upload & Analyze Record"}
               </Button>
               <Link
                 to="/patient/records"
-                className="text-sm font-medium text-teal-700 hover:underline"
+                className="text-sm font-medium text-slate-600 hover:text-slate-900"
               >
                 Cancel
               </Link>
             </div>
 
             {upload.isPending && (
-              <p className="mt-3 text-sm text-slate-500" aria-live="polite">
-                Uploading and extracting text. A large or scanned document can take a
-                moment.
-              </p>
+              <div className="mt-4 rounded-md bg-teal-50 p-3 text-sm text-teal-800 flex items-center gap-2">
+                <span className="inline-block h-3 w-3 animate-ping rounded-full bg-teal-600" />
+                <span>
+                  Uploading file, performing OCR text extraction, and parsing clinical
+                  data... Please wait a moment.
+                </span>
+              </div>
             )}
           </Card>
 
-          <Card
-            title="Optional details"
-            description="Helps you find this record later. None of it is read from the file."
-          >
-            <div className="space-y-4">
-              <TextInput
-                label="Title"
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                placeholder="CBC report - June"
-                maxLength={200}
-                hint="Left blank, the filename is used."
-              />
-              <Select
-                label="What kind of document is this?"
-                value={category}
-                onChange={(event) => setCategory(event.target.value)}
-              >
-                {CATEGORIES.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
-              <TextInput
-                label="Date on the document"
-                type="date"
-                value={documentDate}
-                onChange={(event) => setDocumentDate(event.target.value)}
-                hint="Optional. Type it exactly as printed on the report."
-              />
-            </div>
+          {/* Details & Help Card */}
+          <div className="space-y-6">
+            <Card
+              title="2. Document Details"
+              description="Helpful information to organize your medical history."
+            >
+              <div className="space-y-4">
+                <TextInput
+                  label="Document Title"
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="e.g. Complete Blood Count (CBC) - June 2026"
+                  maxLength={200}
+                  hint="Left blank, the file name will be used automatically."
+                />
 
-            <p className="mt-4 text-xs leading-relaxed text-slate-500">
-              The original PDF is always kept. If a document is a scan with no readable
-              text, CAREVERSE records that it needs OCR rather than guessing at what it
-              says.
-            </p>
-          </Card>
+                <Select
+                  label="Document Category"
+                  value={category}
+                  onChange={(event) => setCategory(event.target.value)}
+                >
+                  {CATEGORIES.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+
+                <TextInput
+                  label="Date on the Document (Optional)"
+                  type="date"
+                  value={documentDate}
+                  onChange={(event) => setDocumentDate(event.target.value)}
+                  hint="If known, enter the date printed on the report."
+                />
+              </div>
+            </Card>
+
+            <Card title="How CareVerse Handles Your Records">
+              <ul className="space-y-2.5 text-xs text-slate-600">
+                <li className="flex items-start gap-2">
+                  <span className="text-teal-600 font-bold">✓</span>
+                  <span>
+                    <strong>Smart OCR & Extraction:</strong> Scanned reports, photos, and digital
+                    PDFs are automatically scanned for test results, medications, and dates.
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-teal-600 font-bold">✓</span>
+                  <span>
+                    <strong>Safe & Private:</strong> Your original files are stored securely and
+                    remain 100% private. Only doctors you explicitly authorize can ever see them.
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-teal-600 font-bold">✓</span>
+                  <span>
+                    <strong>No Medical Guesswork:</strong> CareVerse extracts what is written on
+                    the document and never invents or guesses findings.
+                  </span>
+                </li>
+              </ul>
+            </Card>
+          </div>
         </div>
       </form>
     </>
