@@ -9,6 +9,7 @@ from app.database import get_db
 from app.middlewares.auth_middleware import assert_own_records
 from app.models.user import UserDocument
 from app.schemas.profile import PatientProfileUpdate
+from app.services.careverse_id_service import CareVerseIdService
 from app.services.profile_service import ProfileService
 
 
@@ -24,3 +25,10 @@ class PatientController:
         db = get_db()
         patient_id = assert_own_records(db, user)
         return ProfileService(db).update(patient_id, payload)
+
+    @staticmethod
+    async def get_careverse_id(user: UserDocument) -> dict:
+        db = get_db()
+        patient_id = assert_own_records(db, user)
+        cid = CareVerseIdService(db).get_or_create(patient_id)
+        return {"careverse_id": cid}

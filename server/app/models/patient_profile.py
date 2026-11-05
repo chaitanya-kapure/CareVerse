@@ -27,10 +27,11 @@ class PatientProfileDocument(TypedDict, total=False):
     updated_at: datetime
 
 
-def serialize_profile(profile: PatientProfileDocument) -> dict:
+def serialize_profile(profile: PatientProfileDocument, careverse_id: Optional[str] = None) -> dict:
     return {
         "id": str(profile["_id"]),
         "patient_id": profile.get("patient_id"),
+        "careverse_id": careverse_id,
         "full_name": profile.get("full_name", ""),
         "date_of_birth": profile.get("date_of_birth"),
         "gender": profile.get("gender", "unspecified"),

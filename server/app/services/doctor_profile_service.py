@@ -1,5 +1,6 @@
 """Doctor profile service — profiles and discovery."""
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -102,22 +103,58 @@ class DoctorProfileService:
         limit: int = 20,
     ) -> dict:
         """Search and discover doctors with filtering and pagination."""
+        # 1. Ensure all doctor accounts in users collection have a doctor_profile row
+        try:
+            for u in self._users.find({"role": "doctor"}):
+                uid = str(u["_id"])
+                if not self._profiles.find_one({"user_id": uid}):
+                    self.get_or_create(uid, u.get("name", ""))
+        except Exception as e:
+            logger.warning("Error syncing doctor profiles: %s", e)
+
         filter_q: dict[str, Any] = {}
-        if specialty and specialty.strip():
-            filter_q["specialty"] = {"$regex": specialty.strip(), "$options": "i"}
+
+        if specialty and specialty.strip() and specialty.strip().lower() != "other":
+            clean_spec = re.escape(specialty.strip())
+            filter_q["specialty"] = {"$regex": clean_spec, "$options": "i"}
+
         if verified_only:
             filter_q["verification_status"] = "verified"
 
         user_name_map: dict[str, str] = {}
         if name and name.strip():
+            raw_term = name.strip()
+            # Clean common titles: e.g. "Dr. John" -> "John"
+            cleaned_term = re.sub(r"^(?:dr\.?|doctor)\s+", "", raw_term, flags=re.IGNORECASE).strip()
+            search_regex = re.escape(cleaned_term or raw_term)
+
             users_cursor = self._users.find(
                 {
                     "role": "doctor",
-                    "name": {"$regex": name.strip(), "$options": "i"},
+                    "$or": [
+                        {"name": {"$regex": search_regex, "$options": "i"}},
+                        {"name": {"$regex": re.escape(raw_term), "$options": "i"}},
+                    ],
                 }
             )
             for u in users_cursor:
                 user_name_map[str(u["_id"])] = u.get("name", "")
+
+            # Also match doctors whose bio, qualifications or specialty contains the term
+            profile_cursor = self._profiles.find(
+                {
+                    "$or": [
+                        {"bio": {"$regex": search_regex, "$options": "i"}},
+                        {"qualifications": {"$regex": search_regex, "$options": "i"}},
+                        {"specialty": {"$regex": search_regex, "$options": "i"}},
+                    ]
+                }
+            )
+            for p in profile_cursor:
+                p_uid = p.get("user_id")
+                if p_uid and p_uid not in user_name_map:
+                    user_name_map[p_uid] = self._resolve_user_name(p_uid)
+
             filter_q["user_id"] = {"$in": list(user_name_map.keys())}
 
         total = self._profiles.count_documents(filter_q)

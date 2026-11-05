@@ -66,19 +66,20 @@ class PatientProfileUpdate(BaseModel):
             raise ValueError(f"Gender must be one of {', '.join(GENDERS)}")
         return value
 
-    # `full_name` needs no validator beyond `min_length` + the model-level
-    # `str_strip_whitespace`, which turns "   " into "" before length is
-    # checked. A custom validator here would only restate that.
-
 
 class PatientProfileResponse(BaseModel):
     """Mirror of `serialize_profile` in models/patient_profile.py."""
 
     id: str
     patient_id: str
+    careverse_id: Optional[str] = None
     full_name: str
     date_of_birth: Optional[str] = None
     gender: str = "unspecified"
     phone: Optional[str] = None
     address: Optional[str] = None
     notes: Optional[str] = None
+
+
+class CareVerseIdResponse(BaseModel):
+    careverse_id: str

@@ -11,6 +11,7 @@ import ExtractionBadge from "../../components/ExtractionBadge";
 import { documentService } from "../../services/document.service";
 import { getErrorMessage } from "../../services/api";
 import { formatBytes, formatCategory, formatDateTime } from "../../utils/format";
+import { formatDocumentDisplayId } from "../../utils/clinicalFormat";
 
 const CATEGORY_FILTERS = [
   { value: "all", label: "All Records" },
@@ -36,10 +37,12 @@ export default function MedicalRecordsPage() {
     return allItems.filter((doc) => {
       const matchesCategory =
         selectedCategory === "all" || doc.category === selectedCategory;
+      const docCode = formatDocumentDisplayId(doc.id, doc.document_code);
       const matchesSearch =
         searchTerm.trim() === "" ||
         doc.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        doc.original_filename.toLowerCase().includes(searchTerm.toLowerCase());
+        doc.original_filename.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        docCode.toLowerCase().includes(searchTerm.toLowerCase());
       return matchesCategory && matchesSearch;
     });
   }, [allItems, selectedCategory, searchTerm]);
@@ -83,7 +86,7 @@ export default function MedicalRecordsPage() {
             <div className="relative flex-1">
               <input
                 type="text"
-                placeholder="Search records by title or file name..."
+                placeholder="Search by title, document ID, or file name..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 py-2 pl-3 pr-8 text-sm focus:border-teal-700 focus:outline-none focus:ring-1 focus:ring-teal-700"
@@ -152,36 +155,44 @@ export default function MedicalRecordsPage() {
             </div>
           ) : (
             <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-              {filteredItems.map((doc) => (
-                <li key={doc.id}>
-                  <Link
-                    to={`/patient/records/${doc.id}`}
-                    className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 transition-colors hover:bg-slate-50"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-slate-900 hover:text-teal-700">
-                        {doc.title}
-                      </p>
-                      <p className="mt-1 truncate text-xs text-slate-500">
-                        <span className="font-medium text-slate-700">
-                          {formatCategory(doc.category)}
-                        </span>
-                        <span aria-hidden="true"> • </span>
-                        {doc.original_filename}
-                        <span aria-hidden="true"> • </span>
-                        Uploaded {formatDateTime(doc.uploaded_at)}
-                        <span aria-hidden="true"> • </span>
-                        {formatBytes(doc.size_bytes)}
-                      </p>
-                    </div>
+              {filteredItems.map((doc) => {
+                const docCode = formatDocumentDisplayId(doc.id, doc.document_code);
+                return (
+                  <li key={doc.id}>
+                    <Link
+                      to={`/patient/records/${doc.id}`}
+                      className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 transition-colors hover:bg-slate-50"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-xs font-bold text-teal-800 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded">
+                            {docCode}
+                          </span>
+                          <p className="truncate text-sm font-semibold text-slate-900 hover:text-teal-700">
+                            {doc.title}
+                          </p>
+                        </div>
+                        <p className="mt-1.5 truncate text-xs text-slate-500">
+                          <span className="font-medium text-slate-700">
+                            {formatCategory(doc.category)}
+                          </span>
+                          <span aria-hidden="true"> • </span>
+                          {doc.original_filename}
+                          <span aria-hidden="true"> • </span>
+                          Uploaded {formatDateTime(doc.uploaded_at)}
+                          <span aria-hidden="true"> • </span>
+                          {formatBytes(doc.size_bytes)}
+                        </p>
+                      </div>
 
-                    <div className="flex items-center gap-3">
-                      <ExtractionBadge status={doc.extraction_status} />
-                      <span className="text-xs font-semibold text-teal-700">View →</span>
-                    </div>
-                  </Link>
-                </li>
-              ))}
+                      <div className="flex items-center gap-3">
+                        <ExtractionBadge status={doc.extraction_status} />
+                        <span className="text-xs font-semibold text-teal-700">View Report →</span>
+                      </div>
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

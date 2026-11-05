@@ -30,6 +30,7 @@ import PatientSummaryPage from "./pages/doctor/PatientSummaryPage";
 
 import FeedPage from "./pages/FeedPage";
 import DiscoverDoctorsPage from "./pages/patient/DiscoverDoctorsPage";
+import DoctorPublicProfilePage from "./pages/patient/DoctorPublicProfilePage";
 import AccessRequestsPage from "./pages/patient/AccessRequestsPage";
 import MessagingPage from "./pages/MessagingPage";
 import NotificationsPage from "./pages/NotificationsPage";
@@ -76,6 +77,7 @@ export default function App() {
               <Route path="summary" element={<MySummaryPage />} />
               <Route path="feed" element={<FeedPage />} />
               <Route path="discover" element={<DiscoverDoctorsPage />} />
+              <Route path="doctors/:userId" element={<DoctorPublicProfilePage />} />
               <Route path="access-requests" element={<AccessRequestsPage />} />
               <Route path="messages" element={<MessagingPage />} />
               <Route path="notifications" element={<NotificationsPage />} />

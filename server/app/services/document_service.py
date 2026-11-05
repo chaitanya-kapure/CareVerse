@@ -38,7 +38,8 @@ from fastapi import UploadFile
 from pymongo.database import Database
 
 from app.config import settings
-from app.models.collections import get_medical_documents
+from app.models.collections import get_medical_documents, get_patient_profiles, get_users
+from app.services.careverse_id_service import CareVerseIdService
 from app.models.medical_document import MedicalDocumentDocument, serialize_document
 from app.schemas.documents import UploadMeta
 from app.services import clinical_analyzer, extraction_service, structured_extraction
@@ -67,6 +68,9 @@ class DocumentService:
     def __init__(self, db: Database, driver: Optional[StorageDriver] = None) -> None:
         self._db = db
         self._docs = get_medical_documents(db)
+        self._users = get_users(db)
+        self._profiles = get_patient_profiles(db)
+        self._id_service = CareVerseIdService(db)
         self._driver = driver
 
     @property
@@ -198,7 +202,13 @@ class DocumentService:
         stored = self._docs.find_one({"_id": inserted.inserted_id})
         if stored is None:  # pragma: no cover - vanished between calls
             raise errors.not_found("Document not found", code="DOCUMENT_NOT_FOUND")
-        return serialize_document(stored, include_text=True)
+        cid, name = self._resolve_patient_info(patient_id)
+        return serialize_document(
+            stored,
+            include_text=True,
+            patient_careverse_id=cid,
+            patient_name=name,
+        )
 
     async def _read_capped(self, file: "UploadFile") -> bytes:  # noqa: F821
         max_bytes = settings.max_upload_mb * 1024 * 1024
@@ -220,9 +230,30 @@ class DocumentService:
     # read
     # ==================================================================
 
+    def _resolve_patient_info(self, patient_id: str) -> tuple[Optional[str], Optional[str]]:
+        cid = self._id_service.get_for_patient(patient_id)
+        name = None
+        profile = self._profiles.find_one({"patient_id": patient_id})
+        if profile and profile.get("full_name"):
+            name = profile["full_name"]
+        elif ObjectId.is_valid(patient_id):
+            u = self._users.find_one({"_id": ObjectId(patient_id)})
+            if u:
+                name = u.get("name")
+        return cid, name
+
     def list_for(self, patient_id: str) -> dict:
+        cid, name = self._resolve_patient_info(patient_id)
         cursor = self._docs.find({"patient_id": patient_id}).sort("uploaded_at", -1)
-        items = [serialize_document(doc) for doc in cursor]
+        items = [
+            serialize_document(
+                doc,
+                include_text=False,
+                patient_careverse_id=cid,
+                patient_name=name,
+            )
+            for doc in cursor
+        ]
         return {"items": items, "total": len(items)}
 
     def get(self, patient_id: str, document_id: str) -> dict:
@@ -252,7 +283,13 @@ class DocumentService:
             except Exception as e:
                 logger.warning("Auto-analysis failed for doc %s: %s", document_id, e)
 
-        return serialize_document(doc, include_text=True)
+        cid, name = self._resolve_patient_info(patient_id)
+        return serialize_document(
+            doc,
+            include_text=True,
+            patient_careverse_id=cid,
+            patient_name=name,
+        )
 
     def read_file(self, patient_id: str, document_id: str) -> tuple[str, str, bytes]:
         """Return (content_type, download_filename, bytes) for a stored PDF."""

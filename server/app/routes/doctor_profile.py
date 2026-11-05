@@ -36,9 +36,14 @@ async def update_my_profile(payload: DoctorProfileUpdate, user: DoctorUser):
 
 
 @router.get(
-    "/",
+    "",
     response_model=DoctorDiscoveryResponse,
     summary="Search and discover doctors",
+)
+@router.get(
+    "/",
+    response_model=DoctorDiscoveryResponse,
+    include_in_schema=False,
 )
 async def search_doctors(
     user: CurrentUser,

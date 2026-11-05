@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import PageHeader from "../../components/ui/PageHeader";
 import Card from "../../components/ui/Card";
@@ -24,17 +25,15 @@ const SPECIALTIES = [
   "Other",
 ];
 
+/**
+ * Only renders a verification badge when explicitly verified.
+ * Never displays a misleading or unpolished 'Unverified' tag.
+ */
 function VerificationBadge({ status }: { status: DoctorProfile["verification_status"] }) {
-  switch (status) {
-    case "verified":
-      return <Badge tone="success">✓ Verified</Badge>;
-    case "pending":
-      return <Badge tone="warning">Pending Review</Badge>;
-    case "rejected":
-      return <Badge tone="danger">Rejected</Badge>;
-    default:
-      return <Badge tone="neutral">Unverified</Badge>;
+  if (status === "verified") {
+    return <Badge tone="success">✓ Verified</Badge>;
   }
+  return null;
 }
 
 function DoctorCard({ doctor }: { doctor: DoctorProfile }) {
@@ -51,20 +50,28 @@ function DoctorCard({ doctor }: { doctor: DoctorProfile }) {
   });
 
   const isPending = followMutation.isPending || unfollowMutation.isPending;
+  const profileUrl = `/patient/doctors/${doctor.user_id}`;
 
   return (
-    <Card className="flex flex-col justify-between h-full">
+    <Card className="flex flex-col justify-between h-full hover:border-slate-300 transition-colors">
       <div>
         <div className="flex items-start justify-between gap-2">
           <div>
-            <h3 className="text-base font-semibold text-slate-900">{doctor.name}</h3>
-            <p className="text-sm font-medium text-teal-700">{doctor.specialty || "General Physician"}</p>
+            <Link
+              to={profileUrl}
+              className="text-base font-bold text-slate-900 hover:text-teal-700 transition-colors"
+            >
+              Dr. {doctor.name.replace(/^Dr\.?\s+/i, "")}
+            </Link>
+            <p className="text-sm font-medium text-teal-700">
+              {doctor.specialty || "General Physician"}
+            </p>
           </div>
           <VerificationBadge status={doctor.verification_status} />
         </div>
 
         {doctor.qualifications && (
-          <p className="mt-2 text-xs text-slate-600 font-mono bg-slate-50 rounded px-2 py-1 inline-block">
+          <p className="mt-2 text-xs text-slate-600 font-mono bg-slate-50 rounded px-2 py-1 inline-block border border-slate-200">
             {doctor.qualifications}
           </p>
         )}
@@ -77,7 +84,7 @@ function DoctorCard({ doctor }: { doctor: DoctorProfile }) {
         )}
 
         {doctor.bio && (
-          <p className="mt-3 text-sm text-slate-600 line-clamp-3">
+          <p className="mt-3 text-sm text-slate-600 line-clamp-3 leading-relaxed">
             {doctor.bio}
           </p>
         )}
@@ -94,25 +101,33 @@ function DoctorCard({ doctor }: { doctor: DoctorProfile }) {
           )}
         </div>
 
-        {doctor.is_following ? (
-          <Button
-            variant="secondary"
-            size="sm"
-            isLoading={isPending}
-            onClick={() => unfollowMutation.mutate()}
-          >
-            Following
-          </Button>
-        ) : (
-          <Button
-            variant="primary"
-            size="sm"
-            isLoading={isPending}
-            onClick={() => followMutation.mutate()}
-          >
-            Follow
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          <Link to={profileUrl}>
+            <Button variant="secondary" size="sm">
+              View Profile
+            </Button>
+          </Link>
+
+          {doctor.is_following ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              isLoading={isPending}
+              onClick={() => unfollowMutation.mutate()}
+            >
+              Following
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              size="sm"
+              isLoading={isPending}
+              onClick={() => followMutation.mutate()}
+            >
+              Follow
+            </Button>
+          )}
+        </div>
       </div>
     </Card>
   );
@@ -129,7 +144,7 @@ export default function DiscoverDoctorsPage() {
     verified_only: verifiedOnly || undefined,
   };
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch, isRefetching } = useQuery({
     queryKey: ["doctors", filters],
     queryFn: () => doctorProfileService.discoverDoctors(filters),
   });
@@ -141,6 +156,11 @@ export default function DiscoverDoctorsPage() {
       <PageHeader
         title="Discover Doctors"
         description="Find qualified medical specialists, follow verified clinicians, and stay updated with health insights."
+        actions={
+          <Button variant="secondary" size="sm" onClick={() => refetch()} isLoading={isRefetching}>
+            Refresh
+          </Button>
+        }
       />
 
       <Card className="mb-6">
@@ -154,7 +174,7 @@ export default function DiscoverDoctorsPage() {
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Dr. Smith"
+              placeholder="e.g. Dr. Smith or Smith"
               className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-teal-600 focus:outline-none focus:ring-1 focus:ring-teal-600"
             />
           </div>
@@ -178,7 +198,7 @@ export default function DiscoverDoctorsPage() {
             </select>
           </div>
 
-          <div className="flex items-center sm:pt-5">
+          <div className="flex items-center sm:pt-5 justify-between">
             <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
               <input
                 type="checkbox"
@@ -186,31 +206,65 @@ export default function DiscoverDoctorsPage() {
                 onChange={(e) => setVerifiedOnly(e.target.checked)}
                 className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
               />
-              Verified doctors only
+              Verified clinicians only
             </label>
+
+            {(name || specialty || verifiedOnly) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setName("");
+                  setSpecialty("");
+                  setVerifiedOnly(false);
+                }}
+                className="text-xs font-semibold text-teal-700 hover:text-teal-900"
+              >
+                Clear Filters
+              </button>
+            )}
           </div>
         </div>
       </Card>
 
       {isLoading ? (
         <div className="py-12">
-          <Spinner label="Searching doctors" />
+          <Spinner label="Searching verified doctors..." />
         </div>
       ) : error ? (
         <Alert tone="danger" title="Could not load doctors">
-          {getErrorMessage(error, "Please try again later.")}
+          {getErrorMessage(error, "Please try again in a moment.")}
         </Alert>
       ) : doctors.length === 0 ? (
         <EmptyState
           title="No doctors found"
-          description="Try broadening your search criteria or clearing filters."
+          description="Try broadening your search term or clearing specialty filters."
+          action={
+            (name || specialty || verifiedOnly) ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setName("");
+                  setSpecialty("");
+                  setVerifiedOnly(false);
+                }}
+              >
+                Clear search &amp; filters
+              </Button>
+            ) : undefined
+          }
         />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {doctors.map((doctor) => (
-            <DoctorCard key={doctor.id} doctor={doctor} />
-          ))}
-        </div>
+        <>
+          <p className="mb-3 text-xs text-slate-500">
+            Showing {doctors.length} {doctors.length === 1 ? "clinician" : "clinicians"}
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {doctors.map((doctor) => (
+              <DoctorCard key={doctor.id} doctor={doctor} />
+            ))}
+          </div>
+        </>
       )}
     </>
   );

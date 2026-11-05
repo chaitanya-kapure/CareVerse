@@ -11,6 +11,7 @@ import Badge from "../../components/ui/Badge";
 import { doctorService } from "../../services/doctor.service";
 import { getErrorMessage } from "../../services/api";
 import { formatDate, formatGender } from "../../utils/format";
+import { formatPatientDisplayId } from "../../utils/clinicalFormat";
 import { isWorthRetrying } from "../../utils/query";
 
 /**
@@ -23,10 +24,6 @@ import { isWorthRetrying } from "../../utils/query";
  * has no way to look up a patient you are not already authorized for.
  */
 export default function AuthorizedPatientsPage() {
-  // `isPending`, not `isLoading`: on the first render a React Query
-  // observation is pending but not yet fetching, so an `isLoading` guard
-  // briefly falls through and shows "no patients have authorized you" --
-  // a false, alarming answer to someone who in fact has several.
   const { data, isPending, error, refetch, isRefetching } = useQuery({
     queryKey: ["doctor-patients"],
     queryFn: doctorService.listPatients,
@@ -37,7 +34,7 @@ export default function AuthorizedPatientsPage() {
     <>
       <PageHeader
         title="Authorized Patients"
-        description="Patients who have granted you access to their records. No one appears here until they do."
+        description="Patients who have granted you access to their medical records. No one appears here until authorized."
         actions={
           <Button variant="secondary" size="sm" onClick={() => refetch()} isLoading={isRefetching}>
             Refresh
@@ -58,7 +55,7 @@ export default function AuthorizedPatientsPage() {
       ) : !data || data.items.length === 0 ? (
         <EmptyState
           title="No patients have authorized you yet"
-          description="Access is granted by the patient from their own account. There is no way to search for a patient or request access, so this list stays empty until someone names you specifically."
+          description="Access is granted by the patient from their own account. There is no open patient directory; patients explicitly authorize your clinical profile."
         />
       ) : (
         <>
@@ -66,42 +63,54 @@ export default function AuthorizedPatientsPage() {
             {data.total} authorized {data.total === 1 ? "patient" : "patients"}
           </p>
 
-          <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white shadow-sm">
-            {data.items.map((entry) => (
-              <li key={entry.patient_id}>
-                <Link
-                  to={`/doctor/patients/${entry.patient_id}`}
-                  className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 transition-colors hover:bg-slate-50"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-slate-900">
-                      {entry.full_name}
-                    </p>
-                    <p className="mt-0.5 truncate text-xs text-slate-500">
-                      {entry.date_of_birth ? formatDate(entry.date_of_birth) : "Date of birth not recorded"}
-                      <span aria-hidden="true"> &middot; </span>
-                      {formatGender(entry.gender)}
-                      <span aria-hidden="true"> &middot; </span>
-                      {entry.document_count}{" "}
-                      {entry.document_count === 1 ? "record" : "records"}
-                    </p>
-                  </div>
-                  {entry.document_count === 0 ? (
-                    <Badge tone="neutral">No records uploaded</Badge>
-                  ) : null}
-                </Link>
-              </li>
-            ))}
+          <ul className="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white shadow-xs overflow-hidden">
+            {data.items.map((entry) => {
+              const displayPatientId = formatPatientDisplayId(entry.patient_id, entry.careverse_id);
+              return (
+                <li key={entry.patient_id}>
+                  <Link
+                    to={`/doctor/patients/${entry.patient_id}`}
+                    className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 transition-colors hover:bg-slate-50"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-xs font-bold text-teal-800 bg-teal-50 border border-teal-200 px-2.5 py-0.5 rounded">
+                          {displayPatientId}
+                        </span>
+                        <p className="truncate text-sm font-semibold text-slate-900 hover:text-teal-700">
+                          {entry.full_name}
+                        </p>
+                      </div>
+                      <p className="mt-1 truncate text-xs text-slate-500">
+                        {entry.date_of_birth ? formatDate(entry.date_of_birth) : "Date of birth not recorded"}
+                        <span aria-hidden="true"> &middot; </span>
+                        {formatGender(entry.gender)}
+                        <span aria-hidden="true"> &middot; </span>
+                        <span className="font-medium text-slate-700">
+                          {entry.document_count} {entry.document_count === 1 ? "record" : "records"}
+                        </span>
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      {entry.document_count === 0 ? (
+                        <Badge tone="neutral">No records uploaded</Badge>
+                      ) : (
+                        <span className="text-xs font-semibold text-teal-700">Open records →</span>
+                      )}
+                    </div>
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         </>
       )}
 
-      <Card className="mt-6" title="What you can do here">
+      <Card className="mt-6" title="Clinical Governance & Privacy">
         <p className="text-sm leading-relaxed text-slate-600">
-          Open a patient to read their profile and records, view the original PDF, and read
-          any text CAREVERSE extracted from it. You cannot edit, replace or delete a
-          patient&apos;s records &mdash; the patient remains the owner of everything they
-          have uploaded, and they can revoke your access at any time.
+          Access covers only patients who have explicitly granted authorization. Every access request
+          and record viewing session is strictly audited under healthcare privacy compliance guidelines.
         </p>
       </Card>
     </>

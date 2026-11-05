@@ -12,6 +12,7 @@ import ExtractionBadge from "../../components/ExtractionBadge";
 import { doctorService } from "../../services/doctor.service";
 import { getErrorCode, getErrorMessage } from "../../services/api";
 import { formatBytes, formatCategory, formatDate, formatDateTime, formatGender } from "../../utils/format";
+import { formatDocumentDisplayId, formatPatientDisplayId } from "../../utils/clinicalFormat";
 import { isWorthRetrying } from "../../utils/query";
 import { NOT_A_DIAGNOSIS_READER_NOTICE } from "../../utils/disclaimers";
 
@@ -43,8 +44,6 @@ export default function PatientDetailsPage() {
     retry: isWorthRetrying,
   });
 
-  // The grant was withdrawn, or never existed. Both are the same answer, and
-  // the screen must not imply which one it was.
   if (profile.isError || documents.isError) {
     const forbidden =
       getErrorCode(profile.error) === "NO_PATIENT_ACCESS" ||
@@ -74,12 +73,6 @@ export default function PatientDetailsPage() {
     );
   }
 
-  // `isPending`, not `isLoading`. `isLoading` is only true once the request
-  // is *also* in flight, and on the very first render a React Query
-  // observation is pending but idle -- so an `isLoading` guard falls straight
-  // through to the success path and renders a screen full of "not recorded"
-  // for a patient who simply has not loaded yet. Checking the error state
-  // first, then the pending state, leaves no gap between the two.
   if (profile.isPending || documents.isPending) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center">
@@ -90,23 +83,31 @@ export default function PatientDetailsPage() {
 
   const patient = profile.data;
   const records = documents.data?.items ?? [];
+  const displayPatientId = formatPatientDisplayId(patientId, patient?.careverse_id);
 
   return (
     <>
       <PageHeader
         title={patient?.full_name ?? "Patient"}
-        description="Records this patient has uploaded. Read-only — the patient owns and controls everything here."
+        description={`Patient ID: ${displayPatientId} • Authorized medical records view`}
+        actions={
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-xs font-bold text-teal-800 bg-teal-50 border border-teal-200 px-3 py-1.5 rounded-lg">
+              {displayPatientId}
+            </span>
+          </div>
+        }
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Link to="/doctor/patients">
           <Button variant="secondary" size="sm">
-            Back to authorized patients
+            ← Back to authorized patients
           </Button>
         </Link>
         <Link to={`/doctor/patients/${patientId}/summary`}>
           <Button variant="secondary" size="sm">
-            View summary
+            View AI Health Summary
           </Button>
         </Link>
       </div>
@@ -117,14 +118,15 @@ export default function PatientDetailsPage() {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card
-          title="Patient profile"
-          description="The details the patient entered themselves."
+          title="Patient Profile"
+          description="Identification and demographic information provided by the patient."
           className="lg:col-span-1"
         >
           <dl className="divide-y divide-slate-100 text-sm">
-            <DetailRow label="Full name" value={patient?.full_name} empty="Not provided" />
+            <DetailRow label="Patient ID" value={displayPatientId} />
+            <DetailRow label="Full Name" value={patient?.full_name} empty="Not provided" />
             <DetailRow
-              label="Date of birth"
+              label="Date of Birth"
               value={patient?.date_of_birth ? formatDate(patient.date_of_birth) : null}
               empty="Not recorded"
             />
@@ -143,8 +145,8 @@ export default function PatientDetailsPage() {
         </Card>
 
         <Card
-          title="Medical records"
-          description="Every PDF this patient has uploaded, newest first."
+          title="Medical Records"
+          description="Every clinical report, lab test, and prescription uploaded by this patient."
           className="lg:col-span-2"
         >
           {records.length === 0 ? (
@@ -154,32 +156,45 @@ export default function PatientDetailsPage() {
             />
           ) : (
             <ul className="divide-y divide-slate-200">
-              {records.map((doc) => (
-                <li key={doc.id}>
-                  <Link
-                    to={`/doctor/patients/${patientId}/records/${doc.id}`}
-                    className="-mx-2 flex flex-wrap items-center justify-between gap-3 rounded-md px-2 py-3 transition-colors hover:bg-slate-50"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-slate-900">{doc.title}</p>
-                      <p className="mt-0.5 truncate text-xs text-slate-500">
-                        {doc.original_filename}
-                        <span aria-hidden="true"> &middot; </span>
-                        {formatCategory(doc.category)}
-                        <span aria-hidden="true"> &middot; </span>
-                        {doc.document_date
-                          ? `dated ${formatDate(doc.document_date)}`
-                          : "no date on document"}
-                        <span aria-hidden="true"> &middot; </span>
-                        uploaded {formatDateTime(doc.uploaded_at)}
-                        <span aria-hidden="true"> &middot; </span>
-                        {formatBytes(doc.size_bytes)}
-                      </p>
-                    </div>
-                    <ExtractionBadge status={doc.extraction_status} />
-                  </Link>
-                </li>
-              ))}
+              {records.map((doc) => {
+                const docCode = formatDocumentDisplayId(doc.id, doc.document_code);
+                return (
+                  <li key={doc.id}>
+                    <Link
+                      to={`/doctor/patients/${patientId}/records/${doc.id}`}
+                      className="-mx-2 flex flex-wrap items-center justify-between gap-3 rounded-lg px-3 py-3.5 transition-colors hover:bg-slate-50"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-xs font-bold text-teal-800 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded">
+                            {docCode}
+                          </span>
+                          <p className="truncate text-sm font-semibold text-slate-900 hover:text-teal-700">
+                            {doc.title}
+                          </p>
+                        </div>
+                        <p className="mt-1 truncate text-xs text-slate-500">
+                          {doc.original_filename}
+                          <span aria-hidden="true"> &middot; </span>
+                          <span className="font-medium text-slate-700">{formatCategory(doc.category)}</span>
+                          <span aria-hidden="true"> &middot; </span>
+                          {doc.document_date
+                            ? `dated ${formatDate(doc.document_date)}`
+                            : "no date on document"}
+                          <span aria-hidden="true"> &middot; </span>
+                          uploaded {formatDateTime(doc.uploaded_at)}
+                          <span aria-hidden="true"> &middot; </span>
+                          {formatBytes(doc.size_bytes)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <ExtractionBadge status={doc.extraction_status} />
+                        <span className="text-xs font-semibold text-teal-700">Inspect →</span>
+                      </div>
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </Card>

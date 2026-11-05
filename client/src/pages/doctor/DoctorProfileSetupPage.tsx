@@ -32,17 +32,18 @@ function toForm(profile: DoctorProfile): FormState {
   };
 }
 
+/**
+ * Verification badge displayed only when practitioner credentials are confirmed.
+ * Does not display an unverified label.
+ */
 function VerificationBadge({ status }: { status: DoctorProfile["verification_status"] }) {
-  switch (status) {
-    case "verified":
-      return <Badge tone="success">✓ Verified Practitioner</Badge>;
-    case "pending":
-      return <Badge tone="warning">Verification Under Review</Badge>;
-    case "rejected":
-      return <Badge tone="danger">Verification Rejected</Badge>;
-    default:
-      return <Badge tone="neutral">Unverified</Badge>;
+  if (status === "verified") {
+    return <Badge tone="success">✓ Verified Practitioner</Badge>;
   }
+  if (status === "pending") {
+    return <Badge tone="warning">Verification In Review</Badge>;
+  }
+  return null;
 }
 
 export default function DoctorProfileSetupPage() {
@@ -136,15 +137,13 @@ export default function DoctorProfileSetupPage() {
           description="These details appear to patients searching for clinicians and in social feed posts."
           actions={<VerificationBadge status={profile.verification_status} />}
           footer={
-            profile.verification_status !== "verified" ? (
-              <p className="text-xs text-amber-800">
-                Notice: Your practitioner verification status is currently{" "}
-                <strong>{profile.verification_status}</strong>. Verification is reviewed by administrative staff
-                against medical licensing registers.
-              </p>
-            ) : (
+            profile.verification_status === "verified" ? (
               <p className="text-xs text-emerald-800">
                 Your medical practitioner profile is fully verified.
+              </p>
+            ) : (
+              <p className="text-xs text-slate-500">
+                Professional medical licensing credentials are systematically verified against clinical registries by administrative staff.
               </p>
             )
           }

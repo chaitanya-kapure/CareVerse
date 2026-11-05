@@ -20,6 +20,7 @@ from pymongo.database import Database
 from app.models.collections import get_patient_profiles, get_users
 from app.models.patient_profile import PatientProfileDocument, serialize_profile
 from app.schemas.profile import PatientProfileUpdate
+from app.services.careverse_id_service import CareVerseIdService
 from app.utils import errors
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ class ProfileService:
         self._db = db
         self._profiles = get_patient_profiles(db)
         self._users = get_users(db)
+        self._id_service = CareVerseIdService(db)
 
     # --- read -------------------------------------------------------------
 
@@ -52,7 +54,8 @@ class ProfileService:
             profile = self._create(patient_id)
             if profile is None:
                 raise errors.not_found("Profile not found", code="PROFILE_NOT_FOUND")
-        return serialize_profile(profile)
+        careverse_id = self._id_service.get_or_create(patient_id)
+        return serialize_profile(profile, careverse_id)
 
     # --- write ------------------------------------------------------------
 

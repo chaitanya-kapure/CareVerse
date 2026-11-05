@@ -86,6 +86,7 @@ export interface ApiErrorBody {
 export interface PatientProfile {
   id: string;
   patient_id: string;
+  careverse_id?: string | null;
   full_name: string;
   date_of_birth: string | null;
   gender: "male" | "female" | "other" | "unspecified";
@@ -103,7 +104,10 @@ export type ExtractionStatus =
 
 export interface MedicalDocumentSummary {
   id: string;
+  document_code?: string;
   patient_id: string;
+  patient_careverse_id?: string | null;
+  patient_name?: string | null;
   original_filename: string;
   mime_type: string;
   size_bytes: number;
@@ -194,6 +198,7 @@ export interface AccessGrantRequest {
  */
 export interface DoctorPatientSummary {
   patient_id: string;
+  careverse_id?: string | null;
   full_name: string;
   date_of_birth: string | null;
   gender: string;

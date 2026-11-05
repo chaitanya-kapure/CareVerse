@@ -27,6 +27,7 @@ from app.models.collections import (
     get_medical_documents,
     get_patient_profiles,
 )
+from app.services.careverse_id_service import CareVerseIdService
 from app.services.document_service import DocumentService
 from app.services.profile_service import ProfileService
 from app.utils import errors
@@ -39,6 +40,7 @@ class DoctorService:
         self._db = db
         self._profiles = get_patient_profiles(db)
         self._documents = get_medical_documents(db)
+        self._id_service = CareVerseIdService(db)
 
     # ==================================================================
     # patient list
@@ -64,9 +66,11 @@ class DoctorService:
         items = []
         for patient_id in authorized_patient_ids:
             profile = self._profiles.find_one({"patient_id": patient_id})
+            careverse_id = self._id_service.get_for_patient(patient_id)
             items.append(
                 {
                     "patient_id": patient_id,
+                    "careverse_id": careverse_id,
                     "full_name": (profile or {}).get("full_name") or "Name not provided",
                     "date_of_birth": (profile or {}).get("date_of_birth"),
                     "gender": (profile or {}).get("gender", "unspecified"),

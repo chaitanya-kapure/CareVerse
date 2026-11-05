@@ -99,11 +99,20 @@ class MedicalDocumentDocument(TypedDict, total=False):
     updated_at: datetime
 
 
-def serialize_document(doc: MedicalDocumentDocument, include_text: bool = False) -> dict:
+def serialize_document(
+    doc: MedicalDocumentDocument,
+    include_text: bool = False,
+    patient_careverse_id: Optional[str] = None,
+    patient_name: Optional[str] = None,
+) -> dict:
     """List/metadata shape. `extracted_text` is opt-in because it is large."""
+    doc_id = str(doc["_id"])
     payload = {
-        "id": str(doc["_id"]),
+        "id": doc_id,
+        "document_code": f"DOC-{doc_id[-8:].upper()}",
         "patient_id": doc.get("patient_id"),
+        "patient_careverse_id": patient_careverse_id,
+        "patient_name": patient_name,
         "original_filename": doc.get("original_filename"),
         "mime_type": doc.get("mime_type"),
         "size_bytes": doc.get("size_bytes"),

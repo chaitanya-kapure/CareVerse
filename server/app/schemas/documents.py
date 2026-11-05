@@ -36,7 +36,10 @@ class MedicalDocumentSummaryResponse(BaseModel):
     """
 
     id: str
+    document_code: Optional[str] = None
     patient_id: str
+    patient_careverse_id: Optional[str] = None
+    patient_name: Optional[str] = None
     original_filename: str
     mime_type: str
     size_bytes: int
