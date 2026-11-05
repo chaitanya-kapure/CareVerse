@@ -893,3 +893,87 @@ def test_tight_prescription_prefix_extracts_medication():
     assert "Lobazam" in names
     assert "Omeprazole" in names
 
+
+# ======================================================================
+# 14. flattened results tables (lab reports, OCR, scans)
+# ======================================================================
+
+
+def test_a_delimited_table_row_is_read_cell_by_cell():
+    result = extract_structured(
+        "Total cholesterol | Less than 200 mg/dL | 236 mg/dL | (High)"
+    )
+    entry = find_named(result, "Total cholesterol")
+    assert entry["value"] == "236"
+    assert entry["unit"] == "mg/dL"
+    assert entry["reference_range"] == "<200"
+    assert entry["flag"] == "high"
+
+
+def test_a_bare_reference_range_is_read():
+    entry = find_named(
+        extract_structured("Total Cholesterol 236 mg/dL 0-200"), "Total Cholesterol"
+    )
+    assert entry["reference_range"] == "0-200"
+
+
+def test_a_reference_range_spelt_with_to_is_read():
+    entry = find_named(
+        extract_structured("Triglycerides 210 mg/dL 150 to 199"), "Triglycerides"
+    )
+    assert entry["reference_range"] == "150-199"
+
+
+def test_a_serial_number_prefix_is_not_part_of_the_name():
+    entry = find_named(
+        extract_structured("1 Total Cholesterol 236 mg/dL (<200)"), "Total Cholesterol"
+    )
+    assert entry["reference_range"] == "<200"
+
+
+def test_a_comma_formatted_count_is_read():
+    entry = find_named(extract_structured("TLC 11,000 cells/cumm (4,000-10,000)"), "TLC")
+    assert entry["value"] == "11,000"
+    assert entry["reference_range"] == "4,000-10,000"
+
+
+def test_a_result_on_the_line_under_the_name_is_read():
+    result = extract_structured("Total Cholesterol\n236 mg/dL")
+    entry = only("lab_values", result)[0]
+    assert entry["name"] == "Total Cholesterol"
+    assert entry["value"] == "236"
+    assert entry["unit"] == "mg/dL"
+
+
+def test_a_flattened_row_with_its_result_last_is_read():
+    line = (
+        "Total cholesterol Less than 200mg/dL (Desirable) "
+        "200-239 mg/dL (Borderline high) 240mg/dL and above (High) 236"
+    )
+    entry = find_named(extract_structured(line), "Total cholesterol")
+    assert entry["value"] == "236"
+    assert entry["unit"] == "mg/dL"
+    assert entry["source_text"] == line
+
+
+def test_an_unfilled_results_table_yields_nothing_instead_of_a_guess():
+    """A template whose result column is empty has no results to record.
+
+    The reference-range cells must not become patient results, and the
+    reference text under a history heading must not become stated
+    conditions or abnormal findings.
+    """
+    text = (
+        "Cholesterol Test Reports\nClinical history:\nTest results\n"
+        "Total cholesterol\nLess than 200mg/dL (Desirable)\n"
+        "200-239 mg/dL (Borderline high)\n240mg/dL and above (High)\n"
+        "LDL cholesterol\nLess than 100mg/dL (Optimal)\n"
+        "Triglycerides\nLess than 150 mg/dL (Normal)\n150 to 199 mg/dL (Borderline high)"
+    )
+    assert extract_structured(text) == {}
+
+
+def test_a_reference_range_line_is_never_a_patient_result():
+    assert "lab_values" not in extract_structured("Less than 200 mg/dL (Desirable)")
+    assert "lab_values" not in extract_structured("200 to 499 mg/dL (High)")
+

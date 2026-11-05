@@ -300,11 +300,14 @@ export function isValidLabReading(
     if (!isCount) return false;
   }
 
-  // Unitless check
+  // Unitless check: the server only emits a unitless reading when it was
+  // printed as the patient's result for a named test, so a plain number is
+  // shown as recorded rather than dropped from the table.
   if (!unit || !unit.trim()) {
     const lower = cleanName.toLowerCase();
     if (UNITLESS_ACCEPTED_TESTS.has(lower)) return true;
     if (/ratio|index|score/i.test(lower)) return true;
+    if (/^[<>≤≥]?\s*-?\d[\d,]*(?:\.\d+)?$/.test(cleanValue)) return true;
     return false;
   }
 

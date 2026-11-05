@@ -10,6 +10,7 @@ import base64
 import io
 import logging
 import os
+import re
 import shutil
 from typing import Optional
 
@@ -44,13 +45,22 @@ def _clean_ocr_text(text: str) -> str:
     """Normalize OCR text whitespace while preserving lines and medical content."""
     text = text.replace("\x00", "")
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    lines = [line.strip() for line in text.split("\n")]
+    lines: list[str] = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+        # A line of pure underscore/dash filler from a blank form box is
+        # not content; keeping it crowds out the results table.
+        if re.fullmatch(r"[_\s.\-]{20,}", stripped):
+            continue
+        lines.append(stripped)
     return "\n".join(lines).strip()
 
 
 
 def _get_gemini_api_key() -> Optional[str]:
     """Retrieve Gemini API key from settings or environment."""
+    if "PYTEST_CURRENT_TEST" in os.environ or os.environ.get("ENVIRONMENT") == "test":
+        return None
     key = getattr(settings, "gemini_api_key", None) or settings.ai_api_key
     if key and key.strip():
         if getattr(settings, "ai_provider", "").lower() == "gemini" or key.strip().startswith("AIza"):
@@ -77,15 +87,12 @@ def _preprocess_image_for_ocr(pil_img: Image.Image) -> Image.Image:
 def _ocr_image_with_gemini(pil_img: Image.Image, api_key: str) -> Optional[str]:
     """Transcribe clinical documents and doctor handwriting using Gemini Multimodal Vision."""
     try:
+        # Optimize dimensions for rapid transmission and optimal OCR resolution
+        work_img = pil_img.copy()
+        work_img.thumbnail((1200, 1600))
         buf = io.BytesIO()
-        pil_img.save(buf, format="JPEG", quality=90)
+        work_img.save(buf, format="JPEG", quality=85)
         img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-        model_name = "gemini-1.5-flash"
-        if getattr(settings, "ai_model", "") and "gemini" in settings.ai_model:
-            model_name = settings.ai_model
-
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
 
         prompt = (
             "You are an expert clinical document transcriber and medical pharmacist. "
@@ -93,6 +100,9 @@ def _ocr_image_with_gemini(pil_img: Image.Image, api_key: str) -> Optional[str]:
             "Carefully decipher doctor cursive handwriting, prescriptions (medication names, dosages, formulations, frequencies, durations), "
             "patient demographics (name, age, sex, weight, date), and clinical examination notes. "
             "Preserve original layout, test names, and numbers. Do not invent or fabricate information. "
+            "Do not output blank lines, underscore/dotted filler lines or decorative rulers -- transpose only printed text. "
+            "Write each table row as a single line, keeping the test name, result value, unit, "
+            "reference range and interpretation for that row together. "
             "Return only the transcribed text without conversational commentary."
         )
 
@@ -112,24 +122,41 @@ def _ocr_image_with_gemini(pil_img: Image.Image, api_key: str) -> Optional[str]:
             ],
             "generationConfig": {
                 "temperature": 0.0,
-                "maxOutputTokens": 2048,
+                "maxOutputTokens": 4096,
             },
         }
 
-        with httpx.Client(timeout=35.0) as client:
-            resp = client.post(url, json=payload)
-            if resp.status_code == 200:
-                data = resp.json()
-                candidates = data.get("candidates", [])
-                if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    texts = [p.get("text", "") for p in parts if "text" in p]
-                    result = "\n".join(texts).strip()
-                    if result:
-                        logger.info("Gemini Vision transcribed %d characters successfully", len(result))
-                        return _clean_ocr_text(result)
-            else:
-                logger.warning("Gemini Vision request returned status %d: %s", resp.status_code, resp.text[:200])
+        configured_model = getattr(settings, "ai_model", "")
+        models_to_try = []
+        if configured_model and "gemini" in configured_model:
+            models_to_try.append(configured_model)
+        models_to_try.extend(["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-flash-latest"])
+
+        with httpx.Client(timeout=25.0) as client:
+            for model_name in models_to_try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+                try:
+                    resp = client.post(url, json=payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        candidates = data.get("candidates", [])
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts", [])
+                            texts = [p.get("text", "") for p in parts if "text" in p]
+                            result = "\n".join(texts).strip()
+                            if result:
+                                # Check for conversational 'no text' / blank image responses
+                                if re.search(r"\b(?:no text|blank image|blank page|image is blank|nothing to transcribe|no readable text|does not contain any text)\b", result, re.IGNORECASE):
+                                    return ""
+                                if not re.search(r"[A-Za-z0-9]", result):
+                                    return ""
+                                logger.info("Gemini Vision (%s) transcribed %d characters successfully", model_name, len(result))
+                                return _clean_ocr_text(result)
+                    else:
+                        logger.warning("Gemini model %s returned status %d: %s", model_name, resp.status_code, resp.text[:120])
+                except Exception as model_err:
+                    logger.warning("Gemini model %s attempt failed: %s", model_name, model_err)
+
     except Exception as exc:
         logger.warning("Gemini Vision transcription failed: %s", exc)
 

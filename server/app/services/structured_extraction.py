@@ -79,7 +79,9 @@ def extract_structured(text: str) -> ExtractedData:
     )
     _put(result, "medications", medications)
 
-    lab_values = _guard(_extract_lab_values, lines, medication_lines, default=[])
+    lab_values, _claimed_lab_lines = _guard(
+        _extract_lab_values, lines, medication_lines, default=([], set())
+    )
     _put(result, "lab_values", lab_values)
 
     abnormal_findings = _guard(_extract_abnormal_findings, lines, default=[])
@@ -324,14 +326,38 @@ def _parse_iso_date(raw: str) -> Optional[str]:
 # ======================================================================
 
 # name, separator, value, optional unit. The name is non-greedy and the
+# separator check below decides where the name ends. Real reports also
+# print serial numbers ("1 Haemoglobin ...") and names that start with a
+# digit ("25-OH Vitamin D"), so the name may start with a digit --
+# `_usable_lab_name` refuses pure-number first words to keep ranges such as
+# "200 to 499 mg/dL" from becoming a test.
 _LAB_LINE = re.compile(
-    r"^(?P<name>[A-Za-z][A-Za-z0-9 ()'/%+.\-]{0,59}?)[:\s]+"
-    r"(?P<value>[<>≤≥]?\s*-?\d+(?:\.\d+)?)\s*"
+    r"^(?P<name>[A-Za-z0-9][A-Za-z0-9 ()'/%+.\-]{0,59}?)[:\s]+"
+    r"(?P<value>[<>≤≥]?\s*-?\d[\d,]*(?:\.\d+)?)\s*"
     r"(?P<unit>\S{1,12})?\s*$"
 )
 
+# Tolerates one extra trailing word after the unit -- the "Method" column of
+# many lab reports ("236 mg/dL Enzymatic"). The extra word is dropped, never
+# recorded; the value, unit and any printed range stand on their own.
+_LAB_LINE_EXTRA = re.compile(
+    r"^(?P<name>[A-Za-z0-9][A-Za-z0-9 ()'/%+.\-]{0,59}?)[:\s]+"
+    r"(?P<value>[<>≤≥]?\s*-?\d[\d,]*(?:\.\d+)?)\s*"
+    r"(?P<unit>\S{1,12})\s+"
+    r"(?P<extra>[A-Za-z][A-Za-z\-]{1,19})\s*$"
+)
+
+# A serial-number or bullet prefix on a table row. Bare numbers need care:
+# "200 to 499 mg/dL" is a reference-range bullet, not "serial 200" -- the
+# negative lookahead keeps comparator words from being treated as a name.
+_ROW_PREFIX = re.compile(
+    r"^\s*(?:[-•·*]+\s+|\d{1,3}[.)]\s+|\(\d{1,3}\)\s+|"
+    r"\d{1,3}\s+(?![A-Za-z]*(?:to|and|or|than)\b)(?=[A-Za-z]))"
+)
+
 _UNIT_SHAPE = re.compile(
-    r"^(?:%|[A-Za-zµμ][A-Za-z0-9%./µμ*\-^_]{0,11}"
+    r"^(?:%|[A-Za-zµμ][A-Za-z0-9%./µμ*\-^_]{0,5}"
+    r"|[A-Za-zµμ][A-Za-z0-9µμ]*\/[A-Za-z][A-Za-z0-9]{0,6}"
     r"|/[A-Za-z][A-Za-z0-9/]{0,5}"
     r"|\d+\*?\d*/[A-Za-z][A-Za-z0-9]{0,5})$"
 )
@@ -346,6 +372,23 @@ _TRAILING_RANGE_LABELLED = re.compile(
     r"\s*(?:ref(?:erence)?(?:\s+range)?|normal(?:\s+range)?|therapeutic(?:\s+range)?)"
     r"\s*[:=]?\s*(?P<low>-?\d+(?:\.\d+)?)\s*(?:-|–|—|to)\s*(?P<high>-?\d+(?:\.\d+)?)\s*$",
     re.IGNORECASE,
+)
+
+# A reference range printed without brackets, at the end of a row:
+# "236 mg/dL 0-200", "236 mg/dL <200", "210 mg/dL 150 to 199". Anchored to
+# the end, and `_pop_trailing_range` refuses to take the row's own result
+# value, which has the same shape.
+_TRAILING_RANGE_BARE = re.compile(
+    r"\s*(?P<range>[<>≤≥]\s*-?\d[\d.,]*|"
+    r"-?\d[\d.,]*\s*(?:-|–|—|to)\s*-?\d[\d.,]*)\s*$",
+    re.IGNORECASE,
+)
+
+# A printed result line with no test name -- the patient's own number,
+# which tables and OCR frequently put on the line under the test name.
+_VALUE_LINE = re.compile(
+    r"^\s*(?P<value>[<>≤≥]?\s*-?\d[\d,]*(?:\.\d+)?)\s*"
+    r"(?P<unit>\S{1,12})?\s*$"
 )
 
 _TRAILING_MARKER = re.compile(
@@ -422,6 +465,23 @@ _LAB_NAME_VERBISH = re.compile(
     re.IGNORECASE,
 )
 
+# Reference-range descriptors read as test names by a naive split on the
+# number: "Less than 200 mg/dL" would otherwise become a test called
+# "Less than". None of these can start a test name.
+_LAB_NAME_COMPARATOR = re.compile(
+    r"^(?:less than|greater than|more than|no more than|up to|at least|"
+    r"below|above|over|under|borderline|very high|near optimal|optimal|"
+    r"desirable)\b",
+    re.IGNORECASE,
+)
+
+# Single interpretation labels, never test names on their own.
+_LAB_NAME_INTERPRETATION_LABELS = {
+    "high", "low", "normal", "abnormal", "critical", "positive", "negative",
+    "borderline high", "very high", "near optimal", "optimal", "desirable",
+    "increased", "decreased", "elevated",
+}
+
 # Demographics that appear on more laboratory reports than they should, and
 _LAB_NAME_FORBIDDEN = re.compile(
     r"\b(?:date\s+of\s+birth|birth\s*date|d\.?\s?o\.?\s?b\.?|born|age\s+of)\b",
@@ -431,8 +491,9 @@ _LAB_NAME_FORBIDDEN = re.compile(
 
 def _extract_lab_values(
     lines: list[str], medication_lines: set[int]
-) -> list[dict]:
+) -> tuple[list[dict], set[int]]:
     found: list[dict] = []
+    claimed: set[int] = set()
     for index, line in enumerate(lines):
         if index in medication_lines:
             # "Metformin 500 mg twice daily" is a prescription, not a
@@ -442,18 +503,428 @@ def _extract_lab_values(
         entry = _parse_lab_line(line)
         if entry:
             found.append(entry)
+            claimed.add(index)
 
-    return _dedupe(found, ("name", "value", "unit"), MAX_LAB_VALUES)
+    found.extend(_extract_split_lab_values(lines, medication_lines, claimed))
+    return _dedupe(found, ("name", "value", "unit"), MAX_LAB_VALUES), claimed
 
 
 def _parse_lab_line(line: str) -> Optional[dict]:
     """One laboratory row, or `None` if this line is not one."""
-    for text, flag in _lab_candidates(line):
-        trimmed, reference_range = _pop_trailing_range(text)
-        entry = _interpret_lab_text(trimmed, line, reference_range, flag)
+    stripped = _ROW_PREFIX.sub("", line).strip()
+    if not stripped:
+        return None
+
+    cell_entry = _parse_cell_row(line, stripped)
+    if cell_entry:
+        return cell_entry
+
+    # A qualitative result ("CRP: Negative") IS the trailing word itself;
+    # stripping it as a marker would leave nothing to read. Take it whole.
+    if _parse_qualitative_line(stripped):
+        entry = _interpret_lab_text(stripped, line, None, None)
+        if entry:
+            return entry
+
+    # Measured with the whole line stripped of its trailing range and flag,
+    # in either order -- "236 mg/dL High (200-239)" and
+    # "236 mg/dL (200-239) H" are the same row.
+    working = stripped
+    reference_range: Optional[str] = None
+    flag: Optional[str] = None
+    for _ in range(4):
+        remainder, range_found = _pop_trailing_range(working)
+        if range_found:
+            reference_range = reference_range or range_found
+            working = remainder
+            continue
+        remainder, marker = _pop_trailing_marker(working)
+        if marker and flag is None:
+            flag = marker
+        if remainder != working:
+            working = remainder
+            continue
+        break
+
+    entry = _interpret_lab_text(working, line, reference_range, flag)
+    if entry:
+        return entry
+
+    # A trailing word that is not a unit, a range or a marker: the "Method"
+    # column ("236 mg/dL Enzymatic"). Only accepted when what remains is a
+    # full lab row in its own right.
+    if working:
+        entry = _interpret_lab_text_extra(working, line, reference_range, flag)
+        if entry:
+            return entry
+
+    # Measured with the whole line stripped of its trailing range and flag,
+    # in either order -- "236 mg/dL High (200-239)" and
+    # "236 mg/dL (200-239) H" are the same row.
+    if flag is None and reference_range is None:
+        entry = _parse_trailing_result_row(stripped)
         if entry:
             return entry
     return None
+
+
+def _pop_trailing_marker(text: str) -> tuple[str, Optional[str]]:
+    """Remove a printed marker from the end of a row, or leave it alone."""
+    marker_match = _TRAILING_MARKER.search(text)
+    if not marker_match:
+        return text, None
+    token = marker_match.group("marker")
+    flag = _MARKER_FLAGS.get(token.lower())
+    if not flag:
+        return text, None
+    stripped = text[: marker_match.start()].strip()
+    if not stripped or _token_is_unit(text, token):
+        return text, None
+    return stripped, flag
+
+
+def _parse_cell_row(line: str, stripped: str) -> Optional[dict]:
+    """A table row spread across cells, in one extracted line.
+
+    Delimited rows -- "Total Cholesterol | 236 | mg/dL | <200 | High",
+    including the multi-space shape pypdf emits for columnar reports --
+    are read cell by cell while single-space prose stays on the prose
+    path. The first cell is the test name, the first numeric cell is
+    the result, and any remaining cell is taken as a unit, a reference
+    range or a marker, in column order.
+    """
+    if "|" not in stripped and "\t" not in stripped and not re.search(r"\s{2,}", stripped):
+        return None
+    # Markdown emphasis from a vision model ("**236 mg/dL**") is not part
+    # of the printed row; drop it for parsing while `source_text` keeps
+    # the original line.
+    cells = [
+        cell.strip().replace("*", "").strip()
+        for cell in re.split(r"\||\t|\s{2,}", stripped)
+        if cell.strip()
+    ]
+    if len(cells) < 2:
+        return None
+
+    value_index = next(
+        (index for index, cell in enumerate(cells) if _CELL_VALUE.match(cell)),
+        None,
+    )
+    if value_index is None or value_index == 0:
+        return None
+
+    name_parts: list[str] = []
+    reference_range: Optional[str] = None
+    for cell in cells[:value_index]:
+        if _looks_like_range_cell(cell):
+            if reference_range is None:
+                reference_range = _range_from_cell(cell)
+        else:
+            name_parts.append(cell)
+    name = " ".join(name_parts).strip()
+    if not name:
+        return None
+
+    value_cell = _CELL_VALUE.match(cells[value_index])
+    assert value_cell is not None
+    value = (value_cell.group("value") or "").strip()
+    unit = (value_cell.group("unit") or "").strip() or None
+    if unit and not _UNIT_SHAPE.match(unit):
+        return None
+
+    flag: Optional[str] = None
+    for cell in cells[value_index + 1:]:
+        bare = cell.strip("()").strip()
+        marker = _MARKER_FLAGS.get(bare.lower())
+        if marker and flag is None:
+            flag = marker
+            continue
+        if unit is None and _UNIT_SHAPE.match(cell):
+            unit = cell
+            continue
+        if reference_range is None and _looks_like_range_cell(cell):
+            reference_range = _range_from_cell(cell)
+            continue
+
+    if not _usable_lab_name(name):
+        return None
+    if not _usable_lab_value(value, unit, name, reference_range, flag):
+        return None
+    return _lab_entry(
+        name=name,
+        value=value,
+        unit=unit,
+        reference_range=reference_range,
+        flag=flag,
+        source_text=line,
+    )
+
+
+_CELL_VALUE = re.compile(
+    r"^(?P<value>[<>≤≥]?\s*-?\d[\d,]*(?:\.\d+)?)\s*"
+    r"(?P<unit>[A-Za-z%µμ][A-Za-z0-9%./µμ*\-^_]{0,11})?$"
+)
+
+_CELL_RANGE = re.compile(
+    r"^(?:less than|greater than|more than|up to|at least|below|above)\b", re.IGNORECASE
+)
+
+
+def _looks_like_range_cell(cell: str) -> bool:
+    """True when a cell holds a reference range rather than a name."""
+    cleaned = cell.strip()
+    if _CELL_RANGE.match(cleaned):
+        return True
+    if re.match(r"^[<>≤≥]?\s*-?\d[\d.,]*\s*(?:-|–|—|to)\s*-?\d[\d.,]*", cleaned):
+        return True
+    return bool(re.match(r"^[<>≤≥]\s*-?\d[\d.,]*\s*[A-Za-z%]*$", cleaned.strip()))
+
+
+def _range_from_cell(cell: str) -> str:
+    """The printed range in a reference cell, without its words.
+
+    "Less than 200 mg/dL" becomes "<200"; "200-239 mg/dL" stays
+    "200-239". The words are the document's prose for the range and
+    are not carried into the stored field.
+    """
+    range_match = re.search(r"-?\d[\d.,]*\s*(?:-|–|—|to)\s*-?\d[\d.,]*", cell)
+    if range_match:
+        return _normalise_range(range_match.group(0))
+    number_match = re.search(r"-?\d[\d.,]*", cell)
+    if number_match:
+        stripped = cell.strip()
+        lowered = cell.lower()
+        if stripped and stripped[0] in "<>≤≥":
+            prefix = stripped[0]
+        elif lowered.startswith(("less than", "up to", "below", "under")):
+            prefix = "<"
+        elif lowered.startswith(("greater than", "more than", "above", "over")):
+            prefix = ">"
+        elif lowered.startswith("at least"):
+            prefix = ">="
+        else:
+            prefix = ""
+        return (prefix + number_match.group(0))[:MAX_VALUE_CHARS]
+    return _normalise_range(cell)
+
+
+def _extract_split_lab_values(
+    lines: list[str],
+    medication_lines: set[int],
+    claimed: set[int],
+) -> list[dict]:
+    """Test name on one line, result on the line under it.
+
+    Tables flattened by pypdf or OCR routinely put the name and the
+    patient's result on separate lines -- "Total cholesterol" over
+    "236 mg/dL" -- which no single-line parse can recover. The name
+    line must read as a test name on its own, and the result line must
+    be a bare result: a number with an optional unit, never a
+    reference-range bullet or a date.
+    """
+    found: list[dict] = []
+    claimed_values: set[int] = set()
+    for index, line in enumerate(lines):
+        if index in claimed or index in medication_lines:
+            continue
+        if not _quotable(line) or ":" in line:
+            continue
+        if not _looks_like_test_name(line):
+            continue
+        for ahead in range(1, 4):
+            if index + ahead >= len(lines):
+                break
+            value_line = lines[index + ahead]
+            if index + ahead in claimed or index + ahead in medication_lines:
+                continue
+            if not _quotable(value_line) or _looks_like_range_cell(value_line):
+                continue
+            entry = _parse_value_line(line, value_line)
+            if entry:
+                found.append(entry)
+                claimed_values.add(index + ahead)
+                break
+    return found
+
+
+def _looks_like_test_name(line: str) -> bool:
+    """A line that names a test without stating a result."""
+    if _ANY_HEADING.match(line):
+        return False
+    if _FINDINGS_HEADING.match(line) or _CONDITION_HEADING.match(line):
+        return False
+    if _LAB_NAME_FORBIDDEN.search(line) or _LAB_NAME_VERBISH.search(line):
+        return False
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9 ()'/%+.\-]{0,59}", line):
+        # Also accept names that start with a digit-letter pair ("25-OH ...").
+        if not re.fullmatch(r"[A-Za-z0-9]*[A-Za-z][A-Za-z0-9 ()'/%+.\-]{0,59}", line):
+            return False
+    if re.search(r"\d{4}-\d{2}-\d{2}", line):
+        return False
+    return _usable_lab_name(line)
+
+
+def _parse_value_line(name_line: str, value_line: str) -> Optional[dict]:
+    """Pair a name line with the result line beneath it."""
+    # Anything that is itself a full lab row is the other row's start.
+    if _parse_lab_line(value_line):
+        return None
+    if _is_date_like(value_line):
+        return None
+    # A bare result has no serial number of its own; the row prefix must
+    # not eat its value ("236 mg/dL" is a result, not serial 236).
+    work = value_line.strip()
+    match = _VALUE_LINE.match(work)
+    if not match:
+        return None
+    value = (match.group("value") or "").strip()
+    unit = (match.group("unit") or "").strip()
+    if unit and not _UNIT_SHAPE.match(unit):
+        return None
+    # A 4-digit year next to a name is a date, not a result.
+    digits = re.sub(r"[^\d]", "", value)
+    if len(digits) == 4 and value.startswith(("19", "20")) and not unit:
+        return None
+    # A trailing range or marker on the result line is printed too.
+    remainder, reference_range = _pop_trailing_range(work)
+    remainder, marker = _pop_trailing_marker(remainder)
+    if remainder != work:
+        reparsing = _VALUE_LINE.match(remainder)
+        if not reparsing:
+            return None
+        value = (reparsing.group("value") or "").strip()
+        unit = (reparsing.group("unit") or "").strip()
+    flag = marker
+    name = name_line.strip()
+    if not _usable_lab_value(value, unit or None, name, reference_range, flag):
+        return None
+    source_text = name_line + "\n" + value_line
+    if len(source_text) > MAX_SOURCE_TEXT_CHARS or not source_text:
+        return None
+    return _lab_entry(
+        name=name,
+        value=value,
+        unit=unit or None,
+        reference_range=reference_range,
+        flag=flag,
+        source_text=source_text,
+    )
+
+
+def _is_date_like(line: str) -> bool:
+    if re.search(r"\b\d{4}-\d{1,2}-\d{1,2}\b", line):
+        return True
+    if re.search(r"\b\d{1,2}/\d{1,2}/\d{4}\b", line):
+        return True
+    return False
+
+
+# A table row read left to right in which the reference range occupies
+# the middle columns and the patient's result is the last number on the
+# line: "Total cholesterol Less than 200 mg/dL (Desirable) 236". The
+# trailing number (with an optional unit) is the result; the text
+# between the test name and that number is the printed reference text
+# and is not converted into a single reference range.
+_TRAILING_RESULT = re.compile(
+    r"(?:^|\s)(?P<value>[<>≤≥]?\s*-?\d[\d,]*(?:\.\d+)?)"
+    r"(?:\s+(?P<unit>\S{1,12}))?\s*$"
+)
+
+_TRAILING_NAME_TAIL = re.compile(
+    r"\s+(?:less than|greater than|more than|no more than|up to|at least|"
+    r"below|above|over|under|and|or|to)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _parse_trailing_result_row(line: str) -> Optional[dict]:
+    """A flattened table row whose result is its last number."""
+    if not re.search(r"\d", line):
+        return None
+    # Needs a printed reference-range token in the middle of the line;
+    # without one a trailing number is prose, not a table cell.
+    if not _looks_like_range_cell(line) and not re.search(
+        r"(?:less than|greater than|more than|up to|at least)\b", line, re.IGNORECASE
+    ):
+        return None
+
+    working = line
+    _remainder, flag = _pop_trailing_marker(working)
+    working = _remainder
+    trailing = _TRAILING_RESULT.search(working)
+    if not trailing:
+        return None
+    value = (trailing.group("value") or "").strip()
+    unit = (trailing.group("unit") or "").strip()
+    if unit and not _UNIT_SHAPE.match(unit):
+        # The word after the result is the interpretation, not a unit.
+        unit = ""
+    if not unit:
+        # A bare result column inherits the unit the row itself prints
+        # beside its reference values ("Less than 200 mg/dL").
+        middle = working[: trailing.start()]
+        for candidate_match in re.finditer(
+            r"\d\s*(?P<u>[A-Za-z%µμ][A-Za-z0-9%./µμ*\-^_]{0,11})", middle
+        ):
+            candidate = candidate_match.group("u")
+            if _UNIT_SHAPE.match(candidate):
+                unit = candidate
+                break
+
+    name = working[: trailing.start()].strip(" :,|")
+    # The name ends where the reference text starts: the first digit on
+    # its own (not the digit inside an abbreviation like B12).
+    digit_at = re.search(r"(?:^|\s)\d", name)
+    if digit_at:
+        name = name[: digit_at.start()].strip(" :,|")
+    while True:
+        trimmed = _TRAILING_NAME_TAIL.sub("", name).strip(" :,|")
+        if trimmed == name:
+            break
+        name = trimmed
+    if not _usable_lab_name(name):
+        return None
+    if not _usable_lab_value(value, unit or None, name, None, flag):
+        return None
+    return _lab_entry(
+        name=name,
+        value=value,
+        unit=unit or None,
+        reference_range=None,
+        flag=flag,
+        source_text=line,
+    )
+
+
+def _interpret_lab_text_extra(
+    text: str, source_text: str, reference_range: Optional[str], flag: Optional[str]
+) -> Optional[dict]:
+    """A lab row followed by one extra word (the Method column)."""
+    match = _LAB_LINE_EXTRA.match(text)
+    if not match:
+        return None
+    name = (match.group("name") or "").strip()
+    value = (match.group("value") or "").strip()
+    unit = (match.group("unit") or "").strip()
+    if unit and not _UNIT_SHAPE.match(unit):
+        return None
+    # Only a unit that looks like an abbreviation may carry a Method-column
+    # word after it; otherwise the "extra word" is part of a name that
+    # happens to sit next to a number ("Type 2 Diabetes Mellitus").
+    if "/" not in unit and "%" not in unit and len(unit) > 4:
+        return None
+    if not _usable_lab_value(value, unit or None, name, reference_range, flag):
+        return None
+    if not _usable_lab_name(name):
+        return None
+    return _lab_entry(
+        name=name,
+        value=value,
+        unit=unit or None,
+        reference_range=reference_range,
+        flag=flag,
+        source_text=source_text,
+    )
 
 
 def _lab_candidates(line: str) -> list[tuple[str, Optional[str]]]:
@@ -499,6 +970,17 @@ def _pop_trailing_range(text: str) -> tuple[str, Optional[str]]:
             text[: labelled.start()].strip(),
             _normalise_range(f"{labelled.group('low')}-{labelled.group('high')}"),
         )
+
+    bare = _TRAILING_RANGE_BARE.search(text)
+    if bare:
+        # Never take the row's own result value, which has the same shape
+        # as a range tail ("Cholesterol 236" must not become a range).
+        preceding = text[: bare.start()]
+        if re.search(r"[A-Za-z]", preceding) and re.search(r"\d", preceding):
+            return (
+                preceding.strip(),
+                _normalise_range(bare.group("range")),
+            )
 
     return text, None
 
@@ -567,14 +1049,31 @@ def _parse_qualitative_line(work: str) -> Optional[tuple[str, str]]:
 def _usable_lab_name(name: str) -> bool:
     if not name or len(name) > MAX_NAME_CHARS:
         return False
-    if len(name.split()) > MAX_NAME_WORDS:
+    clean = name.strip()
+    if len(clean) < 2:
+        return False
+    if len(clean.split()) > MAX_NAME_WORDS:
+        return False
+    clean_lower = clean.lower()
+    if clean_lower in {"x", "p/a", "r/a", "wt", "weight", "ht", "height", "bmi", "bp", "hr", "pulse", "temp", "rr"}:
         return False
     clean = name.strip()
     clean_lower = clean.lower()
     if clean_lower in _LAB_NAME_STOPWORDS:
         return False
+    if clean_lower in _LAB_NAME_INTERPRETATION_LABELS:
+        return False
+    if clean_lower in {"to", "and", "or", "of", "the", "a", "an", "for"}:
+        return False
+    if _LAB_NAME_COMPARATOR.match(clean):
+        return False
     first_word = clean_lower.split()[0]
     if first_word in _LAB_NAME_STOPWORDS:
+        return False
+    # A bare number cannot open a test name ("200 to 499 mg/dL" is a
+    # reference range, not a test called "200 to"). Names that start with a
+    # number combined with a letter ("25-OH Vitamin D") are fine.
+    if first_word.isdigit():
         return False
     if _LAB_NAME_FORBIDDEN.search(clean):
         return False
@@ -597,6 +1096,9 @@ def _usable_lab_value(
     flag: Optional[str] = None,
 ) -> bool:
     if not value or len(value) > MAX_VALUE_CHARS:
+        return False
+
+    if unit and unit.lower().strip() in {"month", "months", "mon", "yr", "yrs", "year", "years", "day", "days", "wk", "wks", "week", "weeks", "hr", "hrs", "hour", "hours", "min", "mins"}:
         return False
 
     digits = re.sub(r"[^\d]", "", value)
@@ -650,7 +1152,8 @@ def _lab_entry(
 
 def _normalise_range(raw: str) -> str:
     """`12.0 - 15.0` -> `12.0-15.0`."""
-    collapsed = re.sub(r"\s*[-–—]\s*", "-", raw.strip())
+    collapsed = re.sub(r"\s+to\s+", "-", raw.strip(), flags=re.IGNORECASE)
+    collapsed = re.sub(r"\s*[-–—]\s*", "-", collapsed)
     collapsed = re.sub(r"\s+", "", collapsed)
     return collapsed[:MAX_VALUE_CHARS]
 
@@ -662,7 +1165,7 @@ def _normalise_range(raw: str) -> str:
 
 _MEDICATION_PREFIX = re.compile(
     r"""^\s*
-    (?:[-*\u2022]+\s*|\d{1,2}[.)]\s*|\([a-z]\)\s*)*           # bullet / numbering
+    (?:[-*\u2022]+\s*|\d{1,2}[.)]\s*|\([0-9a-zA-Z]+\)\s*)*           # bullet / numbering
     (?:(?:take|taken|takes|use|used|using|start|started|starting|continue|
          continued|continuing|apply|applied|inject|injected|give|given|
          prescribe|prescribed|add|added|oral|orally|topical|daily|bd|od)\s+)*
@@ -750,10 +1253,15 @@ def _parse_medication_line(line: str) -> Optional[dict]:
     if name.lower() in _MEDICATION_NAME_STOPWORDS:
         return None
 
-    # A line qualifies only if the document gave it at least one of the three
-    if not (prefix and prefix.group(0).strip()) and not frequency_match:
-        # A dose on its own is not enough. "Glucose 126 mg/dL" has one, and
+    has_prefix = bool(prefix and prefix.group(0).strip())
+    if not has_prefix and not frequency_match:
         return None
+
+    if has_prefix and not frequency_match:
+        p_str = prefix.group(0).strip()
+        is_only_bullet = bool(re.match(r"^[-*\u2022\d.()]+$", p_str))
+        if is_only_bullet and not dose_match:
+            return None
 
     dosage: Optional[str] = None
     if dose_match:
@@ -840,6 +1348,51 @@ _INLINE_SECTION = re.compile(
     r"^(?P<label>[A-Za-z][A-Za-z0-9 /&]{0,40}?)\s*:\s*(?P<body>\S.*)$"
 )
 
+# Reference-range cell shapes. In a flattened table these are as common as
+# plausible prose, and recording one as a finding or a condition invents
+# the claim the document never made.
+_TABLE_RANGE_START = re.compile(
+    r"^\s*[-•·*]?\s*[<>≤≥]?\s*-?\d[\d.,]*\s*(?:-|–|—|to)\s*\d[\d.,]*"
+)
+_TABLE_COMPARATOR = re.compile(
+    r"\b(?:less|greater)\s+than\b.*\d|\b(?:more than|up to|at least)\b.*\d",
+    re.IGNORECASE,
+)
+_TABLE_RANGE_DESCRIPTOR = re.compile(
+    r"^\s*[-•·*]?\s*(?:less than|greater than|more than|no more than|up to|"
+    r"at least|below|above|over|under)\b",
+    re.IGNORECASE,
+)
+_TABLE_PAREN_LABEL = re.compile(r"\(\s*[A-Za-z][A-Za-z ]{1,30}\s*\)\s*$")
+_TABLE_ABOVE_BELOW = re.compile(
+    r"(?:^|\W)(?:above|higher|below|lower)(?:\W|$)", re.IGNORECASE
+)
+_TABLE_UNIT_TAIL = re.compile(r"\d\s*(?:mg|g|ml|l|u|%|/)", re.IGNORECASE)
+
+
+def _is_table_cell_line(line: str) -> bool:
+    """True when a line is a results-table cell, not prose."""
+    if _TABLE_RANGE_START.match(line):
+        return True
+    if _TABLE_RANGE_DESCRIPTOR.match(line):
+        return True
+    if _TABLE_COMPARATOR.search(line) and re.search(r"\d", line):
+        return True
+    if _TABLE_ABOVE_BELOW.search(line) and _TABLE_UNIT_TAIL.search(line):
+        return True
+    if _TABLE_PAREN_LABEL.search(line) and len(line.split()) <= 3:
+        return True
+    return False
+
+
+def _lab_row_like(line: str) -> bool:
+    """True when a line is a lab row with a unit-like token."""
+    entry = _parse_lab_line(line)
+    if not entry:
+        return False
+    unit = entry.get("unit") or ""
+    return bool(unit) and ("/" in unit or "%" in unit or len(unit) <= 4)
+
 
 def _extract_abnormal_findings(lines: list[str]) -> list[dict]:
     findings: list[dict] = []
@@ -857,6 +1410,12 @@ def _extract_abnormal_findings(lines: list[str]) -> list[dict]:
         if _ANY_HEADING.match(line):
             # Some other section's heading: this findings section has ended.
             in_findings_section = False
+
+        if _is_table_cell_line(line) or _lab_row_like(line):
+            # A results table begins or continues here; its cells are for
+            # `lab_values`, never for this prose section.
+            in_findings_section = False
+            continue
 
         # A label with its content on the same line -- "Impression: ..." --
         inline = _INLINE_SECTION.match(line)
@@ -880,7 +1439,11 @@ def _extract_abnormal_findings(lines: list[str]) -> list[dict]:
                 )
             elif in_section:
                 # The document already told us this is a finding. The text is
-                # quoted, never reinterpreted.
+                # quoted, never reinterpreted. A single fragment ("Total",
+                # "high)") is a table cell that leaked into the text, not a
+                # finding, so section captures need at least two words.
+                if len(sentence.split()) < 2:
+                    continue
                 findings.append(
                     {
                         "text": sentence,
@@ -967,6 +1530,12 @@ _SECTION_BOUNDARY_LABELS = {
     "patient details", "investigation", "tests", "results", "result",
     "vitals", "observations chart", "allergies", "immunisations",
     "immunizations", "procedures", "procedure",
+    # Tables of test results end whatever prose section came before them;
+    # leaving one open would record the whole results table as prose.
+    "test results", "test result", "lab results", "lab result",
+    "laboratory results", "laboratory", "lab", "patient results",
+    "patient's result", "reference range", "reference ranges",
+    "normal range", "results table", "lipid profile",
 }
 
 _ANY_HEADING = _heading_pattern(
@@ -1011,6 +1580,12 @@ def _extract_stated_conditions(lines: list[str]) -> list[dict]:
         if _ANY_HEADING.match(line):
             in_condition_section = False
 
+        if _is_table_cell_line(line) or _lab_row_like(line):
+            # A results table begins or continues here; its cells are never
+            # stated conditions.
+            in_condition_section = False
+            continue
+
         matched = False
         for pattern in _CONDITION_PATTERNS:
             for match in pattern.finditer(line):
@@ -1022,7 +1597,11 @@ def _extract_stated_conditions(lines: list[str]) -> list[dict]:
             if matched:
                 break
 
+        # A section capture needs a multi-word entry: a single fragment
+        # ("Total", "cholesterol") is a table name or cell, not a condition.
         if in_condition_section and not matched:
+            if len(line.split()) < 2:
+                continue
             cleaned = _clean_condition(line)
             if cleaned:
                 conditions.append({"text": cleaned, "source_text": line})
