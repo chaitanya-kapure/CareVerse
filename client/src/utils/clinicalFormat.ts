@@ -328,7 +328,7 @@ export function formatMedicalTestName(rawName?: string | null): string {
   }
 
   // Remove common OCR artifacts or trailing punctuation
-  let sanitized = clean
+  const sanitized = clean
     .replace(/[;:,._]+$/, "")
     .replace(/^[;:,._]+/, "")
     .replace(/[_-]+/g, " ");

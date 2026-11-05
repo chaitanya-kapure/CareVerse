@@ -31,10 +31,8 @@ export default function MedicalRecordsPage() {
     queryFn: documentService.list,
   });
 
-  const allItems = data?.items ?? [];
-
   const filteredItems = useMemo(() => {
-    return allItems.filter((doc) => {
+    return (data?.items ?? []).filter((doc) => {
       const matchesCategory =
         selectedCategory === "all" || doc.category === selectedCategory;
       const docCode = formatDocumentDisplayId(doc.id, doc.document_code);
@@ -45,7 +43,7 @@ export default function MedicalRecordsPage() {
         docCode.toLowerCase().includes(searchTerm.toLowerCase());
       return matchesCategory && matchesSearch;
     });
-  }, [allItems, selectedCategory, searchTerm]);
+  }, [data?.items, selectedCategory, searchTerm]);
 
   return (
     <>
