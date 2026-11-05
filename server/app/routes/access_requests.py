@@ -9,7 +9,6 @@ from app.models.user import UserDocument
 from app.schemas.access_request import (
     AccessRequestListResponse,
     AccessRequestResponse,
-    ApproveAccessRequestRequest,
     CreateAccessRequestRequest,
     RejectAccessRequestRequest,
 )
@@ -64,10 +63,9 @@ async def list_sent_requests(
 )
 async def approve_request(
     request_id: str,
-    payload: ApproveAccessRequestRequest,
     user: PatientUser,
 ):
-    return await AccessRequestController.approve(request_id, payload, user)
+    return await AccessRequestController.approve(request_id, user)
 
 
 @router.patch(

@@ -3,7 +3,6 @@ from app.database import get_db
 from app.middlewares.auth_middleware import assert_own_records
 from app.models.user import UserDocument
 from app.schemas.access_request import (
-    ApproveAccessRequestRequest,
     CreateAccessRequestRequest,
     RejectAccessRequestRequest,
 )
@@ -45,7 +44,7 @@ class AccessRequestController:
 
     @staticmethod
     async def approve(
-        request_id: str, payload: ApproveAccessRequestRequest, user: UserDocument
+        request_id: str, user: UserDocument
     ) -> dict:
         db = get_db()
         patient_id = assert_own_records(db, user)

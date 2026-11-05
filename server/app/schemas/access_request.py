@@ -14,11 +14,6 @@ class CreateAccessRequestRequest(BaseModel):
     duration_days: int = Field(default=30, ge=1, le=365)
 
 
-class ApproveAccessRequestRequest(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
-    note: Optional[str] = Field(default=None, max_length=500)
-
-
 class RejectAccessRequestRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
     reason: Optional[str] = Field(default=None, max_length=500)
