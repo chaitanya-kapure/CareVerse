@@ -118,10 +118,10 @@ export default function FindPatientPage() {
     mutationFn: () => {
       if (!searchedPatient) throw new Error("No patient selected");
       return accessRequestService.create({
-        patient_careverse_id: searchedPatient.careverse_id,
+        careverse_id: searchedPatient.careverse_id,
         purpose: purpose.trim(),
-        requested_categories: selectedCategories.length > 0 ? selectedCategories : ["All Records"],
-        requested_duration_days: durationDays,
+        categories: selectedCategories.length > 0 ? selectedCategories : ["All Records"],
+        duration_days: durationDays,
       });
     },
     onSuccess: () => {

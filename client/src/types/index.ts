@@ -365,10 +365,10 @@ export interface AccessRequestListResponse {
 }
 
 export interface CreateAccessRequestPayload {
-  patient_careverse_id: string;
+  careverse_id: string;
   purpose: string;
-  requested_categories: string[];
-  requested_duration_days: number;
+  categories: string[];
+  duration_days: number;
 }
 
 export interface PatientDiscoveryResult {
