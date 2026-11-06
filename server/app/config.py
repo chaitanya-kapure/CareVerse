@@ -1,3 +1,4 @@
+from pathlib import Path
 """Application configuration."""
 
 from functools import lru_cache
@@ -17,9 +18,11 @@ AI_SUMMARY_DISCLAIMER = (
 _AI_PROVIDERS_WITH_A_KEY = frozenset({"openai", "gemini"})
 
 
+_SERVER_ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", str(_SERVER_ENV_PATH)),
         env_file_encoding="utf-8",
         extra="ignore",
     )
